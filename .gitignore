@@ -1,0 +1,31 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info/
+
+# Virtual environments
+.venv
+
+# Secrets / environment
+.env
+.env.*
+!.env.example
+
+# Local database & media
+db.sqlite3
+db.sqlite3-journal
+snapshots/
+
+# Logs
+*.log
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+
+# uv / tooling caches
+.ruff_cache/

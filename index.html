@@ -1,0 +1,940 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>cooplink — dev playground</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0b0d10;
+    --surface:#14171b;
+    --surface-2:#1b1f24;
+    --border:#262b31;
+    --text:#e7e9ec;
+    --muted:#8a9099;
+    --accent:#3fd68c;
+    --accent-dim:#234a37;
+    --money:#f5a623;
+    --money-dim:#4a3a1c;
+    --danger:#e5534b;
+    --info:#58a6ff;
+    --radius:10px;
+    --mono:'JetBrains Mono', ui-monospace, monospace;
+    --sans:'Inter', system-ui, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);}
+  a{color:inherit;text-decoration:none;}
+  button, input, select, textarea{font-family:inherit;}
+
+  header{
+    position:sticky;top:0;z-index:10;
+    display:flex;align-items:center;gap:20px;
+    padding:14px 24px;background:rgba(11,13,16,.92);backdrop-filter:blur(12px);
+    border-bottom:1px solid var(--border);
+  }
+  .logo{font-family:var(--mono);font-weight:700;font-size:18px;display:flex;align-items:center;gap:2px;}
+  .logo .cursor{display:inline-block;width:8px;height:16px;background:var(--accent);margin-left:2px;animation:blink 1.1s steps(1) infinite;}
+  @keyframes blink{50%{opacity:0;}}
+  @media (prefers-reduced-motion: reduce){.logo .cursor{animation:none;}}
+  header input[type="search"]{
+    flex:1;max-width:420px;background:var(--surface);border:1px solid var(--border);
+    color:var(--text);border-radius:8px;padding:9px 12px;font-size:14px;
+  }
+  header input[type="search"]:focus{outline:2px solid var(--accent);outline-offset:1px;}
+  .nav-right{display:flex;align-items:center;gap:10px;margin-left:auto;}
+  .btn{
+    border-radius:8px;padding:9px 14px;font-size:13px;font-weight:600;cursor:pointer;
+    border:1px solid var(--border);background:var(--surface);color:var(--text);
+    transition:border-color .15s,background .15s;
+  }
+  .btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+  .btn:hover{border-color:var(--muted);}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#06251a;}
+  .btn.primary:hover{background:#35bf7c;}
+  .btn.money{background:var(--money);border-color:var(--money);color:#2b1c02;}
+  .btn.danger{background:transparent;border-color:var(--danger);color:var(--danger);}
+  .btn:disabled{opacity:.5;cursor:not-allowed;}
+  .btn-sm{padding:6px 10px;font-size:12px;}
+  .avatar{width:30px;height:30px;border-radius:50%;border:1px solid var(--border);}
+
+  .dev-banner{
+    background:var(--money-dim);color:var(--money);text-align:center;
+    font-family:var(--mono);font-size:12px;padding:6px 16px;
+  }
+
+  main{max-width:1120px;margin:0 auto;padding:28px 24px 80px;}
+  .eyebrow{font-family:var(--mono);color:var(--muted);font-size:12px;letter-spacing:.04em;text-transform:uppercase;margin:0 0 6px;}
+  h1{font-size:26px;margin:0 0 4px;}
+  h2{font-size:18px;margin:0 0 14px;}
+  p.muted{color:var(--muted);font-size:14px;}
+
+  /* ── tabs ─────────────────────────────────────────────── */
+  .tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin:18px 0 0;overflow-x:auto;}
+  .tab{
+    font-family:var(--mono);font-size:12px;padding:10px 16px;cursor:pointer;
+    border:1px solid transparent;border-bottom:none;border-radius:8px 8px 0 0;
+    color:var(--muted);background:transparent;white-space:nowrap;
+    transition:color .15s,background .15s;
+  }
+  .tab:hover{color:var(--text);background:var(--surface);}
+  .tab.active{color:var(--accent);background:var(--surface);border-color:var(--border);}
+  .tab-content{display:none;padding:20px 0;}
+  .tab-content.active{display:block;}
+
+  /* ── filters ─────────────────────────────────────────── */
+  .filters{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0 22px;}
+  .chip{
+    font-family:var(--mono);font-size:12px;padding:6px 12px;border-radius:999px;
+    border:1px solid var(--border);color:var(--muted);cursor:pointer;background:var(--surface);
+    transition:all .15s;
+  }
+  .chip:hover{border-color:var(--accent-dim);color:var(--text);}
+  .chip.active{color:var(--accent);border-color:var(--accent-dim);background:var(--accent-dim);}
+
+  /* ── grid / cards ────────────────────────────────────── */
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px;}
+  .card{
+    background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+    padding:16px;display:flex;flex-direction:column;gap:8px;cursor:pointer;transition:border-color .15s,box-shadow .15s;
+  }
+  .card:hover{border-color:var(--accent-dim);box-shadow:0 0 0 1px var(--accent-dim);}
+  .card .thumb{height:120px;border-radius:8px;background:var(--surface-2);display:flex;align-items:center;justify-content:center;font-family:var(--mono);color:var(--muted);font-size:12px;overflow:hidden;}
+  .card .thumb img{width:100%;height:100%;object-fit:cover;}
+  .card h3{font-size:15px;margin:0;}
+  .card .tags{display:flex;gap:6px;flex-wrap:wrap;}
+  .tag{font-family:var(--mono);font-size:10px;color:var(--muted);border:1px solid var(--border);border-radius:5px;padding:2px 6px;}
+  .price{font-family:var(--mono);color:var(--money);font-weight:600;font-size:14px;margin-top:auto;}
+  .price::before{content:'$ ';opacity:.6;}
+
+  /* ── detail ──────────────────────────────────────────── */
+  .detail-top{display:grid;grid-template-columns:1.4fr 1fr;gap:28px;}
+  @media (max-width:760px){.detail-top{grid-template-columns:1fr;}}
+  .shots{display:flex;gap:8px;overflow-x:auto;border-radius:8px;}
+  .shots img{height:220px;border-radius:8px;border:1px solid var(--border);}
+  .buybox{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;height:fit-content;}
+  .buybox .price{font-size:24px;margin-bottom:12px;}
+  .seller-row{display:flex;align-items:center;gap:8px;margin-top:14px;font-size:13px;color:var(--muted);}
+
+  /* ── stats ───────────────────────────────────────────── */
+  .stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:28px;}
+  .stat{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;transition:border-color .15s;}
+  .stat:hover{border-color:var(--accent-dim);}
+  .stat .eyebrow{margin-bottom:8px;}
+  .stat .value{font-family:var(--mono);font-size:22px;font-weight:600;}
+  .stat.frozen .value{color:var(--money);}
+  .stat.available .value{color:var(--accent);}
+
+  /* ── table ───────────────────────────────────────────── */
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th{text-align:left;color:var(--muted);font-weight:500;font-family:var(--mono);font-size:11px;text-transform:uppercase;padding:8px 10px;border-bottom:1px solid var(--border);}
+  td{padding:10px;border-bottom:1px solid var(--border);}
+  .badge{font-family:var(--mono);font-size:11px;padding:3px 8px;border-radius:5px;}
+  .badge.paid, .badge.published, .badge.completed{background:var(--accent-dim);color:var(--accent);}
+  .badge.pending_payment, .badge.pending_review, .badge.requested, .badge.processing{background:var(--money-dim);color:var(--money);}
+  .badge.failed, .badge.rejected, .badge.refunded{background:#3a1f1d;color:var(--danger);}
+
+  section{margin-bottom:32px;}
+
+  /* ── form ────────────────────────────────────────────── */
+  .form{display:flex;flex-direction:column;gap:14px;max-width:520px;}
+  label{font-size:13px;font-weight:600;display:flex;flex-direction:column;gap:6px;}
+  input[type=text], input[type=number], input[type=url], input[type=password], select, textarea{
+    background:var(--surface);border:1px solid var(--border);color:var(--text);
+    border-radius:8px;padding:10px 12px;font-size:14px;
+  }
+  input:focus, select:focus, textarea:focus{outline:2px solid var(--accent);outline-offset:1px;}
+  textarea{min-height:90px;resize:vertical;}
+
+  /* ── misc ────────────────────────────────────────────── */
+  .empty{padding:40px 20px;text-align:center;color:var(--muted);border:1px dashed var(--border);border-radius:var(--radius);}
+  .toast{position:fixed;bottom:20px;right:20px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 16px;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:50;animation:slideIn .25s ease-out;}
+  .toast.error{border-color:var(--danger);color:var(--danger);}
+  .toast.success{border-color:var(--accent);color:var(--accent);}
+  @keyframes slideIn{from{transform:translateY(20px);opacity:0;}to{transform:translateY(0);opacity:1;}}
+  .skeleton{background:linear-gradient(90deg,var(--surface),var(--surface-2),var(--surface));background-size:200% 100%;animation:shimmer 1.3s infinite;border-radius:8px;}
+  @keyframes shimmer{0%{background-position:200% 0;}100%{background-position:-200% 0;}}
+
+  /* ── api tester ──────────────────────────────────────── */
+  .api-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:14px;}
+  .api-panel summary{cursor:pointer;font-family:var(--mono);font-size:13px;font-weight:600;padding:4px 0;}
+  .api-panel summary .method{display:inline-block;min-width:50px;font-size:11px;padding:2px 6px;border-radius:4px;margin-right:8px;text-align:center;}
+  .method.get{background:#1a3a2a;color:var(--accent);}
+  .method.post{background:#3a2a1a;color:var(--money);}
+  .method.patch{background:#1a2a3a;color:var(--info);}
+  .method.delete{background:#3a1f1d;color:var(--danger);}
+  .api-result{margin-top:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;font-family:var(--mono);font-size:12px;max-height:400px;overflow:auto;white-space:pre-wrap;word-break:break-all;}
+  .api-result.ok{border-color:var(--accent-dim);}
+  .api-result.err{border-color:#3a1f1d;color:var(--danger);}
+  .api-input-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:end;}
+  .api-input-row label{font-size:12px;font-weight:500;gap:4px;}
+  .api-input-row input, .api-input-row select{font-size:12px;padding:6px 8px;min-width:120px;}
+  .status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-left:8px;}
+  .status-dot.ok{background:var(--accent);}
+  .status-dot.err{background:var(--danger);}
+  .status-dot.pending{background:var(--money);}
+</style>
+</head>
+<body>
+
+<div class="dev-banner">⚠ DEV PLAYGROUND — NOT FOR PRODUCTION — this page is an API tester for all Cooplink endpoints</div>
+
+<header>
+  <a href="#/" class="logo">cooplink<span class="cursor"></span></a>
+  <input type="search" id="search-input" placeholder="Search projects, tags, tech..." />
+  <div class="nav-right" id="nav-right"></div>
+</header>
+
+<main id="app"></main>
+
+<script>
+/*
+ * ══════════════════════════════════════════════════════════════════════════
+ *  cooplink — DEV PLAYGROUND
+ *
+ *  This HTML file is a lightweight SPA for rapid development & manual
+ *  API testing.  It is NOT intended for production use — no CSRF, no
+ *  error boundaries, minimal accessibility, no SSR, no i18n, etc.
+ *
+ *  Point API_BASE at your running backend (default http://localhost:8000).
+ * ══════════════════════════════════════════════════════════════════════════
+ */
+const API_BASE = window.location.protocol.startsWith("http") 
+  ? "" 
+  : "http://localhost:8000";
+
+/* ── state ─────────────────────────────────────────────────────────── */
+const state = {
+  token: localStorage.getItem("cooplink_token") || null,
+  user: JSON.parse(localStorage.getItem("cooplink_user") || "null"),
+};
+
+function setAuth(token, user){
+  state.token = token; state.user = user;
+  if (token) { localStorage.setItem("cooplink_token", token); localStorage.setItem("cooplink_user", JSON.stringify(user)); }
+  else { localStorage.removeItem("cooplink_token"); localStorage.removeItem("cooplink_user"); }
+  renderHeader();
+  render();
+}
+
+function toast(msg, isError){
+  const el = document.createElement("div");
+  el.className = "toast" + (isError ? " error" : " success");
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+
+async function api(path, opts = {}){
+  const headers = Object.assign({}, opts.headers);
+  if (!(opts.body instanceof FormData)) headers["Content-Type"] = "application/json";
+  if (state.token) headers["Authorization"] = "Bearer " + state.token;
+  const res = await fetch(API_BASE + path, Object.assign({}, opts, { headers }));
+  if (res.status === 401) { setAuth(null, null); throw new Error("Session expired — please log in again."); }
+  if (!res.ok) {
+    let detail = res.statusText;
+    try { const j = await res.json(); detail = j.detail || JSON.stringify(j); } catch (e) {}
+    throw new Error(detail);
+  }
+  if (res.status === 204) return null;
+  const ct = res.headers.get("content-type") || "";
+  return ct.includes("application/json") ? res.json() : res;
+}
+
+/** Raw API call — returns {status, ok, body} without throwing */
+async function apiRaw(path, opts = {}){
+  const headers = Object.assign({}, opts.headers);
+  if (!(opts.body instanceof FormData)) headers["Content-Type"] = "application/json";
+  if (state.token) headers["Authorization"] = "Bearer " + state.token;
+  const res = await fetch(API_BASE + path, Object.assign({}, opts, { headers }));
+  let body;
+  const ct = res.headers.get("content-type") || "";
+  try { body = ct.includes("json") ? await res.json() : await res.text(); } catch(e) { body = null; }
+  return { status: res.status, ok: res.ok, body };
+}
+
+function money(n){ return Number(n || 0).toLocaleString("en-US"); }
+function fmtDate(d){
+  if (!d) return "—";
+  return new Date(d).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+function fmtDateTime(d){
+  if (!d) return "—";
+  return new Date(d).toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+function escapeHtml(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function statusDot(ok){ return `<span class="status-dot ${ok ? 'ok' : 'err'}"></span>`; }
+
+/* ── header ─────────────────────────────────────────────────────────── */
+function renderHeader(){
+  const el = document.getElementById("nav-right");
+  if (state.user) {
+    el.innerHTML = `
+      <a class="btn" href="#/sell">Sell a project</a>
+      <a class="btn" href="#/dashboard">Dashboard</a>
+      <a class="btn" href="#/api-tester">🧪 API Tester</a>
+      <a href="#/dashboard" title="${escapeHtml(state.user.github_username || state.user.username)}">
+        <img class="avatar" src="${state.user.avatar_url || ''}" alt="" onerror="this.style.visibility='hidden'"/>
+      </a>
+      <button class="btn danger" id="logout-btn">Log out</button>
+    `;
+    document.getElementById("logout-btn").onclick = () => { setAuth(null, null); location.hash = "#/"; };
+  } else {
+    el.innerHTML = `
+      <a class="btn" href="#/api-tester">🧪 API Tester</a>
+      <button class="btn primary" id="login-btn">Log in with GitHub</button>
+    `;
+    document.getElementById("login-btn").onclick = async () => {
+      try {
+        const data = await api("/api/auth/github/login/");
+        if (data.authorization_url) window.location = data.authorization_url;
+        else toast("Login endpoint did not return an authorization_url.", true);
+      } catch (err) {
+        toast("Failed to start GitHub login: " + err.message, true);
+      }
+    };
+  }
+}
+
+document.getElementById("search-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    location.hash = "#/?q=" + encodeURIComponent(e.target.value);
+  }
+});
+
+/* ── router ─────────────────────────────────────────────────────────── */
+const routes = [];
+function route(pattern, handler){ routes.push({ pattern, handler }); }
+
+function matchRoute(hash){
+  const [pathPart, queryPart] = hash.replace(/^#/, "").split("?");
+  const query = Object.fromEntries(new URLSearchParams(queryPart || ""));
+  for (const r of routes) {
+    const keys = [];
+    const regex = new RegExp("^" + r.pattern.replace(/:[^/]+/g, m => { keys.push(m.slice(1)); return "([^/]+)"; }) + "$");
+    const m = pathPart.match(regex);
+    if (m) {
+      const params = {};
+      keys.forEach((k, i) => params[k] = decodeURIComponent(m[i + 1]));
+      return { handler: r.handler, params, query };
+    }
+  }
+  return null;
+}
+
+async function render(){
+  const app = document.getElementById("app");
+  const matched = matchRoute(location.hash || "#/");
+  if (!matched) { app.innerHTML = `<div class="empty">Page not found. <a href="#/">Back to marketplace</a></div>`; return; }
+  app.innerHTML = `<div class="skeleton" style="height:200px;"></div>`;
+  try {
+    await matched.handler(matched.params, matched.query);
+  } catch (err) {
+    app.innerHTML = `<div class="empty">${escapeHtml(err.message)}</div>`;
+    toast(err.message, true);
+  }
+}
+window.addEventListener("hashchange", render);
+
+/* ══════════════════════════════════════════════════════════════════════
+   GitHub OAuth callback
+   ══════════════════════════════════════════════════════════════════════ */
+(async function checkOauthCallback(){
+  if (!location.hash) return;
+  const m = location.hash.match(/access=([^&]+)/);
+  if (m) {
+    const accessToken = m[1];
+    try {
+      const resp = await fetch(API_BASE + "/api/auth/me/", {
+        headers: { Authorization: "Bearer " + accessToken },
+      });
+      if (resp.ok) {
+        const user = await resp.json();
+        setAuth(accessToken, user);
+        location.hash = "";
+        history.replaceState(null, "", location.pathname + location.search);
+        toast("Logged in as " + (user.github_username || user.username));
+      }
+    } catch (e) {
+      console.warn("OAuth callback: could not fetch profile", e);
+    }
+  }
+})();
+
+/* ══════════════════════════════════════════════════════════════════════
+   Marketplace
+   ══════════════════════════════════════════════════════════════════════ */
+route("/", async (params, query) => {
+  const app = document.getElementById("app");
+  const qs = new URLSearchParams();
+  if (query.q) qs.set("q", query.q);
+  if (query.category) qs.set("category", query.category);
+
+  const [listings, categories] = await Promise.all([
+    api(`/api/listings/?${qs.toString()}`).catch(() => ({ results: [] })),
+    api(`/api/listings/categories/`).catch(() => []),
+  ]);
+  const items = listings.results || listings || [];
+  const cats = categories.results || categories || [];
+
+  app.innerHTML = `
+    <p class="eyebrow">Marketplace</p>
+    <h1>Code, built by devs, shipped to devs.</h1>
+    <p class="muted">Browse working projects with source included. Buy, download, done.</p>
+
+    <div class="filters" id="filters">
+      <span class="chip ${!query.category ? "active" : ""}" data-cat="">All</span>
+      ${cats.map(c => `<span class="chip ${query.category === c.slug ? "active" : ""}" data-cat="${c.slug}">${escapeHtml(c.name)}</span>`).join("")}
+    </div>
+
+    <div class="grid" id="grid">
+      ${items.length ? items.map(cardHtml).join("") : `<div class="empty">No listings match yet. Try a different search or check back soon.</div>`}
+    </div>
+  `;
+
+  document.querySelectorAll("#filters .chip").forEach(chip => {
+    chip.onclick = () => {
+      const cat = chip.dataset.cat;
+      location.hash = "#/" + (cat ? `?category=${cat}` : "");
+    };
+  });
+  document.querySelectorAll("#grid .card").forEach(card => {
+    card.onclick = () => location.hash = "#/listing/" + card.dataset.slug;
+  });
+});
+
+function cardHtml(p){
+  return `
+    <div class="card" data-slug="${p.slug}">
+      <div class="thumb">${p.cover_image ? `<img src="${p.cover_image}" alt="">` : "no preview"}</div>
+      <h3>${escapeHtml(p.title)}</h3>
+      <div class="tags">${(p.tech_stack || []).slice(0, 3).map(t => `<span class="tag">${escapeHtml(t)}</span>`).join("")}</div>
+      <div class="price">${money(p.price)} UZS</div>
+    </div>
+  `;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   Listing detail
+   ══════════════════════════════════════════════════════════════════════ */
+route("/listing/:slug", async (params) => {
+  const app = document.getElementById("app");
+  const p = await api(`/api/listings/${params.slug}/`);
+
+  app.innerHTML = `
+    <div class="detail-top">
+      <div>
+        <p class="eyebrow">${escapeHtml(p.category_name || "project")}</p>
+        <h1>${escapeHtml(p.title)}</h1>
+        <div class="tags" style="margin:10px 0 18px;">${(p.tech_stack || []).map(t => `<span class="tag">${escapeHtml(t)}</span>`).join("")}</div>
+        ${p.screenshots && p.screenshots.length ? `<div class="shots">${p.screenshots.map(s => `<img src="${s}" alt="">`).join("")}</div>` : ""}
+        <h2 style="margin-top:22px;">About this project</h2>
+        <p>${escapeHtml(p.description)}</p>
+        ${p.demo_url ? `<p><a class="btn" href="${p.demo_url}" target="_blank" rel="noopener">View live demo →</a></p>` : ""}
+      </div>
+      <div class="buybox">
+        <div class="price">${money(p.price)} UZS</div>
+        <button class="btn money" id="buy-btn" style="width:100%;">Buy & download</button>
+        <div class="seller-row">
+          <img class="avatar" src="${(p.seller_profile && p.seller_profile.avatar_url) || ''}" alt="" onerror="this.style.visibility='hidden'">
+          <span>by ${escapeHtml((p.seller_profile && p.seller_profile.username) || "unknown seller")}</span>
+        </div>
+        <p class="muted" style="margin-top:14px;font-size:12px;">You get a snapshot of the source at time of purchase, plus this listing's license terms.</p>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("buy-btn").onclick = async () => {
+    if (!state.token) { toast("Log in first to buy.", true); return; }
+    const btn = document.getElementById("buy-btn");
+    btn.disabled = true; btn.textContent = "Starting checkout…";
+    try {
+      const order = await api(`/api/orders/`, { method: "POST", body: JSON.stringify({ project_id: p.id }) });
+      if (order.redirect_url) window.location = order.redirect_url;
+      else toast("Order created, but no payment redirect was returned.", true);
+    } catch (err) {
+      toast(err.message, true);
+      btn.disabled = false; btn.textContent = "Buy & download";
+    }
+  };
+});
+
+/* ══════════════════════════════════════════════════════════════════════
+   Dashboard
+   ══════════════════════════════════════════════════════════════════════ */
+route("/dashboard", async () => {
+  if (!state.token) { location.hash = "#/"; toast("Log in to see your dashboard.", true); return; }
+  const app = document.getElementById("app");
+
+  const [summary, payoutsData, salesResp, listingsResp, timeseries] = await Promise.all([
+    api(`/api/dashboard/summary/`).catch(() => ({})),
+    api(`/api/payouts/mine/`).catch(() => ({ available_balance: 0, pending_balance: [], payouts: [] })),
+    api(`/api/dashboard/sales/`).catch(() => ({ results: [] })),
+    api(`/api/dashboard/listings/`).catch(() => ({ results: [] })),
+    api(`/api/dashboard/earnings-timeseries/?range=30d`).catch(() => []),
+  ]);
+
+  const sales = salesResp.results || salesResp || [];
+  const listings = listingsResp.results || listingsResp || [];
+  const pending = payoutsData.pending_balance || [];
+  const totalPending = sum.pending_balance || summary.pending_balance || pending.reduce((s, i) => s + Number(i.amount || 0), 0);
+  const avail = summary.available_balance || payoutsData.available_balance || 0;
+
+  app.innerHTML = `
+    <p class="eyebrow">Dashboard</p>
+    <h1>Your Cooplink activity</h1>
+
+    <div class="stat-row" style="margin-top:20px;">
+      <div class="stat"><div class="eyebrow">Lifetime revenue</div><div class="value">${money(summary.lifetime_revenue)} UZS</div></div>
+      <div class="stat available"><div class="eyebrow">Available now</div><div class="value">${money(avail)} UZS</div></div>
+      <div class="stat frozen"><div class="eyebrow">Pending (7-day hold)</div><div class="value">${money(summary.pending_balance)} UZS</div>
+        ${summary.next_unlock_date ? `<p class="muted" style="margin:6px 0 0;">next unlock ${fmtDate(summary.next_unlock_date)}</p>` : ""}
+      </div>
+      <div class="stat"><div class="eyebrow">Total sales</div><div class="value">${summary.total_sales || 0}</div></div>
+      <div class="stat"><div class="eyebrow">Published listings</div><div class="value">${summary.total_published_listings || 0}</div></div>
+      <div class="stat"><div class="eyebrow">Total downloads</div><div class="value">${summary.total_downloads || 0}</div></div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs" id="dash-tabs">
+      <div class="tab active" data-tab="sales">Sales</div>
+      <div class="tab" data-tab="listings">Listings</div>
+      <div class="tab" data-tab="earnings">Earnings chart</div>
+      <div class="tab" data-tab="payouts">Payouts</div>
+    </div>
+
+    <!-- Tab: Sales -->
+    <div class="tab-content active" id="tab-sales">
+      ${sales.length ? `
+        <table>
+          <thead><tr><th>Buyer</th><th>Project</th><th>Amount</th><th>Date</th><th>Status</th></tr></thead>
+          <tbody>
+            ${sales.map(o => `
+              <tr>
+                <td>${escapeHtml(o.buyer_username)}</td>
+                <td><a href="#/listing/${o.project_slug}">${escapeHtml(o.project_title)}</a></td>
+                <td>${money(o.seller_earning_amount)} UZS</td>
+                <td>${fmtDate(o.created_at)}</td>
+                <td><span class="badge ${o.status}">${(o.status||"").replace("_"," ")}</span></td>
+              </tr>`).join("")}
+          </tbody>
+        </table>
+      ` : `<div class="empty">No sales yet.</div>`}
+    </div>
+
+    <!-- Tab: Listings -->
+    <div class="tab-content" id="tab-listings">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+        <h2 style="margin:0;">Your listings</h2>
+        <a class="btn primary" href="#/sell">+ New listing</a>
+      </div>
+      ${listings.length ? `
+        <table>
+          <thead><tr><th>Project</th><th>Status</th><th>Views</th><th>Sales</th><th>Revenue</th><th>Price</th></tr></thead>
+          <tbody>
+            ${listings.map(l => `
+              <tr>
+                <td><a href="#/listing/${l.slug}">${escapeHtml(l.title)}</a></td>
+                <td><span class="badge ${l.status}">${(l.status||"").replace("_"," ")}</span></td>
+                <td>${l.view_count ?? 0}</td>
+                <td>${l.sales_count ?? 0}</td>
+                <td>${money(l.revenue)} UZS</td>
+                <td>${money(l.price)} UZS</td>
+              </tr>`).join("")}
+          </tbody>
+        </table>
+      ` : `<div class="empty">Nothing listed yet. <a href="#/sell">Sell your first project →</a></div>`}
+    </div>
+
+    <!-- Tab: Earnings chart -->
+    <div class="tab-content" id="tab-earnings">
+      <h2>Earnings (last 30 days)</h2>
+      ${timeseries.length ? renderBarChart(timeseries) : `<div class="empty">No earnings data yet.</div>`}
+    </div>
+
+    <!-- Tab: Payouts -->
+    <div class="tab-content" id="tab-payouts">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+        <h2 style="margin:0;">Payouts</h2>
+        <a class="btn money" href="#/payouts">Request payout</a>
+      </div>
+      ${(payoutsData.payouts || []).length ? `
+        <table>
+          <thead><tr><th>Amount</th><th>Card</th><th>Status</th><th>Requested</th><th>Note</th></tr></thead>
+          <tbody>
+            ${payoutsData.payouts.map(p => `
+              <tr>
+                <td>${money(p.amount)} UZS</td>
+                <td>•••• ${escapeHtml(p.destination_card_last4 || "----")}</td>
+                <td><span class="badge ${p.status}">${p.status}</span></td>
+                <td>${fmtDate(p.requested_at)}</td>
+                <td style="max-width:200px;">${escapeHtml(p.admin_note || "—")}</td>
+              </tr>`).join("")}
+          </tbody>
+        </table>
+      ` : `<div class="empty">No payout requests yet.</div>`}
+
+      ${pending.length ? `
+        <h2 style="margin-top:28px;">Pending earnings (per-sale unlock countdown)</h2>
+        <table>
+          <thead><tr><th>Amount</th><th>Unlocks at</th><th>Countdown</th></tr></thead>
+          <tbody>
+            ${pending.map(p => {
+              const unlocks = new Date(p.unlocks_at);
+              const remaining = Math.max(0, Math.ceil((unlocks - Date.now()) / 86400000));
+              return `<tr>
+                <td>${money(p.amount)} UZS</td>
+                <td>${fmtDateTime(p.unlocks_at)}</td>
+                <td>${remaining > 0 ? remaining + " day(s)" : "<span class='badge paid'>unlocked</span>"}</td>
+              </tr>`;
+            }).join("")}
+          </tbody>
+        </table>
+      ` : ""}
+    </div>
+  `;
+
+  // Tab switching
+  document.querySelectorAll("#dash-tabs .tab").forEach(tab => {
+    tab.onclick = () => {
+      document.querySelectorAll("#dash-tabs .tab").forEach(t => t.classList.remove("active"));
+      document.querySelectorAll(".tab-content").forEach(tc => tc.classList.remove("active"));
+      tab.classList.add("active");
+      document.getElementById("tab-" + tab.dataset.tab).classList.add("active");
+    };
+  });
+
+  document.getElementById("save-tg-btn").onclick = async () => {
+    const val = document.getElementById("tg-id-input").value;
+    try {
+      const updatedUser = await api("/api/auth/me/", {
+          method: "PATCH",
+          body: JSON.stringify({ telegram_chat_id: val })
+      });
+      setAuth(state.token, updatedUser);
+      toast("Notification settings updated.");
+    } catch (err) { toast(err.message, true); }
+  };
+});
+
+function renderBarChart(data){
+  const max = Math.max(...data.map(d => Number(d.earnings)), 1);
+  return `
+    <div style="display:flex;align-items:end;gap:4px;height:160px;padding:10px 0;">
+      ${data.map(d => {
+        const pct = (Number(d.earnings) / max * 100).toFixed(1);
+        return `<div title="${d.date}: ${money(d.earnings)} UZS" style="flex:1;background:var(--accent);border-radius:4px 4px 0 0;height:${pct}%;min-height:2px;cursor:help;transition:opacity .15s;" onmouseenter="this.style.opacity='.7'" onmouseleave="this.style.opacity='1'"></div>`;
+      }).join("")}
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);font-family:var(--mono);">
+      <span>${data[0]?.date || ""}</span>
+      <span>${data[data.length-1]?.date || ""}</span>
+    </div>
+  `;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   Sell — pick a GitHub repo, create a draft listing
+   ══════════════════════════════════════════════════════════════════════ */
+route("/sell", async () => {
+  if (!state.token) { location.hash = "#/"; toast("Log in first.", true); return; }
+  const app = document.getElementById("app");
+  app.innerHTML = `<div class="skeleton" style="height:120px;"></div>`;
+
+  let repos = [];
+  let needsConnect = false;
+  try {
+    const r = await api(`/api/listings/my-repos/`);
+    repos = r.results || r || [];
+  } catch (err) {
+    needsConnect = true;
+  }
+
+  app.innerHTML = `
+    <p class="eyebrow">Sell on Cooplink</p>
+    <h1>List a project</h1>
+
+    ${needsConnect ? `
+      <div class="empty">
+        Connect your GitHub repos to list a project.
+        <div style="margin-top:14px;"><button class="btn primary" id="connect-btn">Connect GitHub repos</button></div>
+      </div>
+    ` : `
+      <form class="form" id="listing-form">
+        <label>Choose a repo
+          <select id="repo-select" required>
+            <option value="" disabled selected>Select a repository…</option>
+            ${repos.map(r => `<option value="${escapeHtml(r.full_name)}">${escapeHtml(r.full_name)}${r.private ? " (private)" : ""}</option>`).join("")}
+          </select>
+        </label>
+        <label>Title
+          <input type="text" id="f-title" required maxlength="80" />
+        </label>
+        <label>Description
+          <textarea id="f-description" required maxlength="2000"></textarea>
+        </label>
+        <label>Price (UZS)
+          <input type="number" id="f-price" min="0" step="1000" required />
+        </label>
+        <label>Tech stack (comma separated)
+          <input type="text" id="f-tech" placeholder="Django, Telegram Bot API, Postgres" />
+        </label>
+        <label>Demo URL (optional)
+          <input type="url" id="f-demo" placeholder="https://" />
+        </label>
+        <label style="flex-direction:row;align-items:center;gap:10px;margin:10px 0;">
+          <input type="checkbox" id="f-terms" required style="width:18px;height:18px;" />
+          <span>I confirm I own this code and agree to the Cooplink Seller Terms.</span>
+        </label>
+        <button class="btn primary" type="submit">Save as draft</button>
+        <p class="muted">Drafts stay private until you submit for review, and a snapshot of the repo is taken automatically at that point.</p>
+      </form>
+    `}
+  `;
+
+  if (needsConnect) {
+    document.getElementById("connect-btn").onclick = async () => {
+      try {
+        const data = await api("/api/auth/github/connect-repos/");
+        if (data.authorization_url) window.location = data.authorization_url;
+      } catch (err) {
+        toast("Failed to start GitHub connect: " + err.message, true);
+      }
+    };
+    return;
+  }
+
+  document.getElementById("listing-form").onsubmit = async (e) => {
+    e.preventDefault();
+    const payload = {
+      github_repo_full_name: document.getElementById("repo-select").value,
+      title: document.getElementById("f-title").value,
+      description: document.getElementById("f-description").value,
+      price: document.getElementById("f-price").value,
+      tech_stack: document.getElementById("f-tech").value.split(",").map(s => s.trim()).filter(Boolean),
+      demo_url: document.getElementById("f-demo").value || null,
+    };
+    try {
+      const project = await api(`/api/listings/projects/`, { method: "POST", body: JSON.stringify(payload) });
+      toast("Draft saved.");
+      location.hash = "#/listing/" + project.slug;
+    } catch (err) { toast(err.message, true); }
+  };
+});
+
+/* ══════════════════════════════════════════════════════════════════════
+   Payouts
+   ══════════════════════════════════════════════════════════════════════ */
+route("/payouts", async () => {
+  if (!state.token) { location.hash = "#/"; toast("Log in first.", true); return; }
+  const app = document.getElementById("app");
+  const data = await api(`/api/payouts/mine/`).catch(() => ({ available_balance: 0, pending_balance: [], payouts: [] }));
+  const items = data.payouts || [];
+  const avail = Number(data.available_balance || 0);
+
+  app.innerHTML = `
+    <p class="eyebrow">Payouts</p>
+    <h1>Request a payout</h1>
+    <p class="muted">Available balance: <strong>${money(avail)} UZS</strong></p>
+
+    <form class="form" id="payout-form" style="margin-top:16px;">
+      <label>Amount (UZS)
+        <input type="number" id="p-amount" min="0" max="${avail}" required />
+      </label>
+      <label>Card number
+        <input type="text" id="p-card" inputmode="numeric" placeholder="8600 0000 0000 0000" required />
+      </label>
+      <button class="btn money" type="submit">Request payout</button>
+      <p class="muted">Payouts are sent by hand by an admin once approved — this just queues the request.</p>
+    </form>
+
+    <section style="margin-top:32px;">
+      <h2>History</h2>
+      ${items.length ? `
+        <table>
+          <thead><tr><th>Amount</th><th>Card</th><th>Status</th><th>Requested</th><th>Note</th></tr></thead>
+          <tbody>
+            ${items.map(p => `
+              <tr>
+                <td>${money(p.amount)} UZS</td>
+                <td>•••• ${escapeHtml(p.destination_card_last4 || "----")}</td>
+                <td><span class="badge ${p.status}">${p.status}</span></td>
+                <td>${fmtDate(p.requested_at)}</td>
+                <td>${escapeHtml(p.admin_note || "—")}</td>
+              </tr>`).join("")}
+          </tbody>
+        </table>
+      ` : `<div class="empty">No payout requests yet.</div>`}
+    </section>
+  `;
+
+  document.getElementById("payout-form").onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      await api(`/api/payouts/request/`, {
+        method: "POST",
+        body: JSON.stringify({
+          amount: document.getElementById("p-amount").value,
+          card_number: document.getElementById("p-card").value.replace(/\s+/g, ""),
+        }),
+      });
+      toast("Payout requested.");
+      render();
+    } catch (err) { toast(err.message, true); }
+  };
+});
+
+/* ══════════════════════════════════════════════════════════════════════
+   API Tester — comprehensive endpoint checker
+   ══════════════════════════════════════════════════════════════════════ */
+route("/api-tester", async () => {
+  const app = document.getElementById("app");
+
+  const endpoints = [
+    // Health
+    { group: "System", method: "GET", path: "/api/health/", desc: "Health check" },
+
+    // Auth
+    { group: "Auth", method: "GET", path: "/api/auth/me/", desc: "Current user profile", auth: true },
+    { group: "Auth", method: "GET", path: "/api/auth/github/login/", desc: "GitHub OAuth start" },
+
+    // Listings
+    { group: "Listings", method: "GET", path: "/api/listings/", desc: "Public marketplace (published)" },
+    { group: "Listings", method: "GET", path: "/api/listings/categories/", desc: "All categories" },
+    { group: "Listings", method: "GET", path: "/api/listings/projects/", desc: "My projects (seller)", auth: true },
+    { group: "Listings", method: "GET", path: "/api/listings/my-repos/", desc: "My GitHub repos (seller)", auth: true },
+
+    // Dashboard
+    { group: "Dashboard", method: "GET", path: "/api/dashboard/summary/", desc: "Seller summary stats", auth: true },
+    { group: "Dashboard", method: "GET", path: "/api/dashboard/sales/", desc: "Paginated sales", auth: true },
+    { group: "Dashboard", method: "GET", path: "/api/dashboard/listings/", desc: "Listings with stats", auth: true },
+    { group: "Dashboard", method: "GET", path: "/api/dashboard/earnings-timeseries/?range=30d", desc: "Daily earnings chart data", auth: true },
+
+    // Payouts
+    { group: "Payouts", method: "GET", path: "/api/payouts/mine/", desc: "My payout history + balance", auth: true },
+    { group: "Payouts", method: "POST", path: "/api/payouts/request/", desc: "Request payout", auth: true,
+      body: { amount: "10000", card_number: "8600123412345678" } },
+
+    // Payments
+    { group: "Payments", method: "GET", path: "/api/payments/mirpay/balance/", desc: "MirPay kassa balance (staff)", auth: true },
+
+    // JWT
+    { group: "JWT", method: "POST", path: "/api/token/", desc: "Obtain JWT (username/password)",
+      body: { username: "", password: "" } },
+    { group: "JWT", method: "POST", path: "/api/token/refresh/", desc: "Refresh JWT",
+      body: { refresh: "" } },
+  ];
+
+  const groups = [...new Set(endpoints.map(e => e.group))];
+
+  app.innerHTML = `
+    <p class="eyebrow">API Tester</p>
+    <h1>Endpoint explorer</h1>
+    <p class="muted">Hit every Cooplink API endpoint from here. Results include status code, timing, and full JSON response.
+      ${state.token ? `<span style="color:var(--accent);">✓ Authenticated</span>` : `<span style="color:var(--danger);">✗ Not authenticated — some endpoints will return 401</span>`}</p>
+
+    <div style="margin:18px 0;">
+      <button class="btn primary" id="run-all-btn">▶ Run all GET endpoints</button>
+    </div>
+
+    ${groups.map(group => `
+      <section>
+        <h2>${escapeHtml(group)}</h2>
+        ${endpoints.filter(e => e.group === group).map((ep, i) => {
+          const id = `api-${group}-${i}`;
+          return `
+            <details class="api-panel" id="${id}">
+              <summary>
+                <span class="method ${ep.method.toLowerCase()}">${ep.method}</span>
+                ${escapeHtml(ep.path)}
+                ${ep.auth ? '<span style="font-size:10px;color:var(--money);margin-left:6px;">🔒 auth</span>' : ''}
+                <span style="float:right;font-size:12px;color:var(--muted);">${escapeHtml(ep.desc)}</span>
+              </summary>
+              ${ep.body ? `
+                <div class="api-input-row">
+                  ${Object.keys(ep.body).map(k => `
+                    <label>${k}
+                      <input type="text" class="api-field" data-key="${k}" value="${escapeHtml(ep.body[k])}" placeholder="${k}" />
+                    </label>
+                  `).join("")}
+                </div>
+              ` : ""}
+              <div class="api-input-row" style="margin-top:8px;">
+                <button class="btn btn-sm primary api-run-btn" data-endpoint='${JSON.stringify(ep)}' data-id="${id}">
+                  ▶ Send
+                </button>
+                <span class="api-timing" id="${id}-timing" style="font-family:var(--mono);font-size:11px;color:var(--muted);"></span>
+              </div>
+              <div class="api-result" id="${id}-result" style="display:none;"></div>
+            </details>
+          `;
+        }).join("")}
+      </section>
+    `).join("")}
+  `;
+
+  // individual endpoint runners
+  document.querySelectorAll(".api-run-btn").forEach(btn => {
+    btn.onclick = async () => {
+      const ep = JSON.parse(btn.dataset.endpoint);
+      const id = btn.dataset.id;
+      const panel = document.getElementById(id);
+
+      // collect form inputs if any
+      let body = null;
+      if (ep.body) {
+        body = {};
+        panel.querySelectorAll(".api-field").forEach(input => {
+          body[input.dataset.key] = input.value;
+        });
+      }
+
+      await runEndpoint(ep, id, body);
+    };
+  });
+
+  // run all GET endpoints
+  document.getElementById("run-all-btn").onclick = async () => {
+    const gets = endpoints.filter(e => e.method === "GET");
+    for (const ep of gets) {
+      const idx = endpoints.filter(e => e.group === ep.group).indexOf(ep);
+      const id = `api-${ep.group}-${idx}`;
+      const panel = document.getElementById(id);
+      if (panel) panel.open = true;
+      await runEndpoint(ep, id, null);
+    }
+  };
+});
+
+async function runEndpoint(ep, id, body) {
+  const resultEl = document.getElementById(id + "-result");
+  const timingEl = document.getElementById(id + "-timing");
+  resultEl.style.display = "block";
+  resultEl.className = "api-result";
+  resultEl.textContent = "loading…";
+  timingEl.textContent = "";
+
+  const opts = { method: ep.method };
+  if (body && ep.method !== "GET") {
+    opts.body = JSON.stringify(body);
+  }
+
+  const start = performance.now();
+  const res = await apiRaw(ep.path, opts);
+  const elapsed = (performance.now() - start).toFixed(0);
+
+  timingEl.textContent = `${res.status} · ${elapsed}ms`;
+  resultEl.className = "api-result " + (res.ok ? "ok" : "err");
+  resultEl.textContent = typeof res.body === "object" ? JSON.stringify(res.body, null, 2) : String(res.body);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   boot
+   ══════════════════════════════════════════════════════════════════════ */
+renderHeader();
+render();
+</script>
+</body>
+</html>
