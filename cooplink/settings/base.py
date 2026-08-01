@@ -373,6 +373,11 @@ UNFOLD = {
                 "collapsible": True,
                 "items": [
                     {
+                        "title": "AI Code Reviews",
+                        "icon": "psychology",
+                        "link": "/admin/moderation/aicodereview/",
+                    },
+                    {
                         "title": "Reports",
                         "icon": "flag",
                         "link": "/admin/moderation/report/",
@@ -485,3 +490,43 @@ LOGGING = {
         "django.request": {"handlers": ["console"], "level": "INFO", "propagate": False},
     },
 }
+
+# Alibaba Model Studio Credentials & Configuration
+ALIBABA_MODEL_STUDIO_API_KEY = env("ALIBABA_MODEL_STUDIO_API_KEY", default="")
+ALIBABA_MODEL_STUDIO_ENDPOINT = env(
+    "ALIBABA_MODEL_STUDIO_ENDPOINT",
+    default="https://ws-yv2o93ke9xiugaok.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+)
+
+
+# Ordered fallback queue for AI Code Reviewer
+AI_REVIEW_MODELS = [
+    "qwen3.6-plus",
+    "qwen3.5-plus-2026-02-15",
+    "qwen3.7-max-2026-06-08",
+    "qwen3.7-max-preview",
+    "qwen3.6-max-preview",
+    "qwen3-32b",
+    "qwen-plus-2025-07-28",
+    "qwen3-max",
+    "qwen-max",
+    "qwen3.5-122b-a10b",
+    "qwen3.5-397b-a17b",
+    "glm-5.2",
+    "glm-5.1",
+    "kimi-k2.7-code",
+    "qwen-mt-flash",
+    "qwen3-vl-32b-thinking",
+    "qwen3-vl-30b-a3b-thinking",
+    "qwen3-vl-235b-a22b-thinking",
+    "qwen3-235b-a22b-thinking-2507",
+    "qwen-vl-ocr-2025-11-20",
+    "qwen3.5-livetranslate-flash-realtime-2026-05-19",
+    "qwen3.5-livetranslate-flash-realtime",
+    "qwen3.5-flash",
+    "qwen3.7-flash",
+    "qwen-plus",
+    "qwen-turbo",
+]
+
+

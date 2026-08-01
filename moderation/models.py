@@ -107,3 +107,81 @@ class ModerationLog(models.Model):
 
     def __str__(self):
         return f"{self.action} by {self.admin} at {self.created_at}"
+
+
+class AICodeReview(models.Model):
+    class Status(models.TextChoices):
+        PASSED = "passed", "Passed (Safe & Matching)"
+        FLAGGED_MALWARE = "flagged_malware", "Flagged Malware"
+        DESCRIPTION_MISMATCH = "description_mismatch", "Description Mismatch"
+        ERROR = "error", "Analysis Error"
+
+    project = models.ForeignKey(
+        "listings.Project",
+        on_delete=models.CASCADE,
+        related_name="ai_code_reviews",
+    )
+    status = models.CharField(
+        max_length=30,
+        choices=Status.choices,
+        default=Status.PASSED,
+    )
+    is_malware = models.BooleanField(
+        default=False,
+        help_text="True if malicious patterns, obfuscation, or backdoors were detected",
+    )
+    malware_score = models.IntegerField(
+        default=0,
+        help_text="Malware risk score from 0 (clean) to 100 (high severity malware)",
+    )
+    match_percentage = models.IntegerField(
+        default=100,
+        help_text="Match score (0-100%) between code logic and project title/description",
+    )
+    summary = models.TextField(
+        blank=True,
+        null=True,
+        help_text="Concise summary of AI review findings",
+    )
+    malware_findings = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of specific suspicious code patterns or threats detected",
+    )
+    description_analysis = models.TextField(
+        blank=True,
+        null=True,
+        help_text="Explanation of description match score",
+    )
+    model_used = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        help_text="Model Studio model that successfully performed the review",
+    )
+    tokens_used = models.PositiveIntegerField(
+        default=0,
+        help_text="Total tokens consumed for prompt and completion",
+    )
+    raw_response = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Raw structured JSON response returned by the AI",
+    )
+    reviewed_at = models.DateTimeField(auto_now_add=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="ai_code_reviews_initiated",
+    )
+
+    class Meta:
+        ordering = ["-reviewed_at"]
+
+    def __str__(self):
+        return (
+            f"AI Review for {self.project.title} "
+            f"({self.get_status_display()}) at {self.reviewed_at}"
+        )
