@@ -6,7 +6,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     initial = True
 
     dependencies = [
@@ -15,21 +14,62 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.CreateModel(
-            name='PayoutRequest',
+            name="PayoutRequest",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('amount', models.DecimalField(decimal_places=2, max_digits=12)),
-                ('destination_card_encrypted', models.TextField(help_text='Fernet-encrypted card number. Decrypted only on the admin detail page.')),
-                ('destination_card_last4', models.CharField(max_length=4)),
-                ('status', models.CharField(choices=[('requested', 'Requested'), ('processing', 'Processing'), ('completed', 'Completed'), ('rejected', 'Rejected')], default='requested', max_length=20)),
-                ('admin_note', models.TextField(blank=True, null=True)),
-                ('requested_at', models.DateTimeField(auto_now_add=True)),
-                ('processed_at', models.DateTimeField(blank=True, null=True)),
-                ('processed_by', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='processed_payouts', to=settings.AUTH_USER_MODEL)),
-                ('seller', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='payout_requests', to=settings.AUTH_USER_MODEL)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                ("amount", models.DecimalField(decimal_places=2, max_digits=12)),
+                (
+                    "destination_card_encrypted",
+                    models.TextField(
+                        help_text=(
+                            "Fernet-encrypted card number. "
+                            "Decrypted only on the admin detail page."
+                        )
+                    ),
+                ),
+                ("destination_card_last4", models.CharField(max_length=4)),
+                (
+                    "status",
+                    models.CharField(
+                        choices=[
+                            ("requested", "Requested"),
+                            ("processing", "Processing"),
+                            ("completed", "Completed"),
+                            ("rejected", "Rejected"),
+                        ],
+                        default="requested",
+                        max_length=20,
+                    ),
+                ),
+                ("admin_note", models.TextField(blank=True, null=True)),
+                ("requested_at", models.DateTimeField(auto_now_add=True)),
+                ("processed_at", models.DateTimeField(blank=True, null=True)),
+                (
+                    "processed_by",
+                    models.ForeignKey(
+                        blank=True,
+                        null=True,
+                        on_delete=django.db.models.deletion.SET_NULL,
+                        related_name="processed_payouts",
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
+                (
+                    "seller",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="payout_requests",
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
             ],
             options={
-                'ordering': ['-requested_at'],
+                "ordering": ["-requested_at"],
             },
         ),
     ]

@@ -1,4 +1,5 @@
 from django.urls import path
+
 from . import views
 
 urlpatterns = [
@@ -10,6 +11,13 @@ urlpatterns = [
     path("projects/", views.project_list_create, name="project_list_create"),
     path("projects/<int:pk>/", views.project_detail, name="project_detail"),
     path("projects/<int:pk>/submit/", views.project_submit, name="project_submit"),
+    path("projects/<int:pk>/new-version/", views.project_new_version, name="project_new_version"),
+    # Comments and ratings (under slug for clean nesting)
+    path("<slug:slug>/comments/", views.comment_list_create, name="comment_list_create"),
+    path("<slug:slug>/ratings/", views.rating_upsert, name="rating_upsert"),
+    path("<slug:slug>/reviews/", views.rating_upsert, name="review_upsert"),
+    path("<slug:slug>/qa/", views.qa_list_create, name="qa_list_create"),
+    path("<slug:slug>/qa/<int:pk>/answer/", views.qa_answer, name="qa_answer"),
     # Public detail — catch-all slug route last
     path("<slug:slug>/", views.project_detail_public, name="project_detail_public"),
 ]

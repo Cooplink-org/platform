@@ -19,9 +19,7 @@ class PayoutRequest(models.Model):
         help_text="Fernet-encrypted card number. Decrypted only on the admin detail page."
     )
     destination_card_last4 = models.CharField(max_length=4)
-    status = models.CharField(
-        max_length=20, choices=Status.choices, default=Status.REQUESTED
-    )
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.REQUESTED)
     admin_note = models.TextField(null=True, blank=True)
     requested_at = models.DateTimeField(auto_now_add=True)
     processed_at = models.DateTimeField(null=True, blank=True)
@@ -37,4 +35,7 @@ class PayoutRequest(models.Model):
         ordering = ["-requested_at"]
 
     def __str__(self):
-        return f"Payout {self.id} — {self.seller.username} — {self.amount} ({self.get_status_display()})"
+        return (
+            f"Payout {self.id} — {self.seller.username} — "
+            f"{self.amount} ({self.get_status_display()})"
+        )

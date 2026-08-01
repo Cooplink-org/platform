@@ -175,6 +175,35 @@
   .status-dot.ok{background:var(--accent);}
   .status-dot.err{background:var(--danger);}
   .status-dot.pending{background:var(--money);}
+
+  /* ── product customization ──────────────────────────────── */
+  .banner{width:100%;height:220px;border-radius:var(--radius);overflow:hidden;margin-bottom:22px;border:1px solid var(--border);background:var(--surface-2);}
+  .banner img{width:100%;height:100%;object-fit:cover;display:block;}
+  .featured-text{color:var(--accent);font-weight:600;font-family:var(--mono);font-size:12px;}
+  .badge.featured{background:var(--accent-dim);color:var(--accent);border:1px solid var(--accent-dim);margin-bottom:8px;display:inline-block;}
+  ul.highlights{list-style:none;padding:0;margin:0 0 18px;display:flex;flex-direction:column;gap:8px;}
+  ul.highlights li{position:relative;padding-left:22px;font-size:14px;color:var(--text);}
+  ul.highlights li::before{content:"✦";position:absolute;left:0;color:var(--accent);}
+  .card-body{display:flex;flex-direction:column;gap:8px;flex:1;}
+  .card-hl{font-size:13px;color:var(--muted);margin:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+
+  /* ── markdown (rendered, escaped) ──────────────────────── */
+  .md{font-size:14px;line-height:1.7;color:var(--text);}
+  .md .md-h{margin:18px 0 8px;line-height:1.3;}
+  .md .md-h:first-child{margin-top:0;}
+  .md .md-p{margin:0 0 12px;color:var(--muted);}
+  .md .md-p code, .md code{font-family:var(--mono);font-size:12px;background:var(--surface-2);padding:1px 5px;border-radius:4px;color:var(--accent);}
+  .md .md-quote{margin:0 0 12px;padding:8px 14px;border-left:3px solid var(--accent-dim);background:var(--surface);border-radius:0 6px 6px 0;color:var(--muted);}
+  .md .md-list{margin:0 0 12px;padding-left:20px;color:var(--muted);}
+  .md .md-list li{margin:4px 0;}
+
+  /* ── filter toolbar ─────────────────────────────────────── */
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:18px 0 0;}
+  .field{background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 10px;font-size:13px;min-width:140px;}
+  .field:focus{outline:2px solid var(--accent);outline-offset:1px;}
+  .field.num{width:110px;min-width:0;}
+  .field-check{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);}
+  @media (max-width:640px){.field{flex:1 1 100%;}}
 </style>
 </head>
 <body>
@@ -267,6 +296,61 @@ function fmtDateTime(d){
 function escapeHtml(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 function statusDot(ok){ return `<span class="status-dot ${ok ? 'ok' : 'err'}"></span>`; }
 
+/* ── query string helpers ──────────────────────────────────────────── */
+function readQuery(){
+  const [_, q] = (location.hash || "#/").split("?");
+  return Object.fromEntries(new URLSearchParams(q || ""));
+}
+function updateQuery(patch, resetPage = true){
+  const q = readQuery();
+  if (resetPage) delete q.page;
+  Object.assign(q, patch);
+  Object.keys(q).forEach(k => { if (q[k] === "" || q[k] == null) delete q[k]; });
+  const s = new URLSearchParams(q).toString();
+  location.hash = "#/" + (s ? "?" + s : "");
+}
+
+/* ── minimal, safe markdown renderer ───────────────────────────────────
+   Supports: # headings, **bold**, *italic*, `code`, > quote, - lists,
+   links [text](url), paragraphs and line breaks. Output is escaped first,
+   so user content can never inject raw HTML. */
+function renderMarkdown(md){
+  if (!md) return "";
+  const esc = s => escapeHtml(s);
+  const lines = String(md).replace(/\r\n/g, "\n").split("\n");
+  let html = "", listOpen = false;
+  const inline = s => esc(s)
+    .replace(/`([^`]+)`/g, (_, c) => `<code>${c}</code>`)
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*([^*]+)\*/g, "<em>$1</em>")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+      (_, t, u) => `<a href="${u}" target="_blank" rel="noopener">${t}</a>`);
+  const closeList = () => { if (listOpen) { html += "</ul>"; listOpen = false; } };
+  for (const raw of lines){
+    const line = raw.trimEnd();
+    if (/^\s*[-*]\s+/.test(line)){
+      if (!listOpen) { html += "<ul class=\"md-list\">"; listOpen = true; }
+      html += `<li>${inline(line.replace(/^\s*[-*]\s+/, ""))}</li>`;
+      continue;
+    }
+    closeList();
+    if (!line.trim()) continue;
+    if (/^#{1,3}\s+/.test(line)){ const lvl = line.match(/^#+/)[0].length; html += `<h${lvl} class="md-h">${inline(line.replace(/^#{1,3}\s+/, ""))}</h${lvl}>`; continue; }
+    if (/^>\s?/.test(line)){ html += `<blockquote class="md-quote">${inline(line.replace(/^>\s?/, ""))}</blockquote>`; continue; }
+    html += `<p class="md-p">${inline(line)}</p>`;
+  }
+  closeList();
+  return html;
+}
+
+/* Apply a seller-chosen accent color to the current product page. */
+function applyAccent(color){
+  const el = document.getElementById("product-accent");
+  if (!el) return;
+  const safe = /^#[0-9a-fA-F]{3,8}$/.test(color || "") ? color : "#3fd68c";
+  el.textContent = `:root{--accent:${safe};--accent-dim:${safe}33;}`;
+}
+
 /* ── header ─────────────────────────────────────────────────────────── */
 function renderHeader(){
   const el = document.getElementById("nav-right");
@@ -276,7 +360,7 @@ function renderHeader(){
       <a class="btn" href="#/dashboard">Dashboard</a>
       <a class="btn" href="#/api-tester">🧪 API Tester</a>
       <a href="#/dashboard" title="${escapeHtml(state.user.github_username || state.user.username)}">
-        <img class="avatar" src="${state.user.avatar_url || ''}" alt="" onerror="this.style.visibility='hidden'"/>
+        <img class="avatar" src="${escapeHtml(state.user.avatar_url || '')}" alt="" onerror="this.style.visibility='hidden'"/>
       </a>
       <button class="btn danger" id="logout-btn">Log out</button>
     `;
@@ -369,8 +453,9 @@ window.addEventListener("hashchange", render);
 route("/", async (params, query) => {
   const app = document.getElementById("app");
   const qs = new URLSearchParams();
-  if (query.q) qs.set("q", query.q);
-  if (query.category) qs.set("category", query.category);
+  ["q", "category", "tags", "tech_stack", "license_type", "min_price", "max_price", "ordering", "featured"].forEach(k => {
+    if (query[k]) qs.set(k, query[k]);
+  });
 
   const [listings, categories] = await Promise.all([
     api(`/api/listings/?${qs.toString()}`).catch(() => ({ results: [] })),
@@ -378,6 +463,17 @@ route("/", async (params, query) => {
   ]);
   const items = listings.results || listings || [];
   const cats = categories.results || categories || [];
+  const licenses = ["mit", "apache2", "gpl3", "proprietary", "other"];
+  const sorts = [
+    { v: "-created_at", label: "Newest" },
+    { v: "created_at", label: "Oldest" },
+    { v: "price", label: "Price ↑" },
+    { v: "-price", label: "Price ↓" },
+    { v: "-view_count", label: "Most popular" },
+  ];
+
+  const isCat = c => query.category === c;
+  const curSort = query.ordering || "-created_at";
 
   app.innerHTML = `
     <p class="eyebrow">Marketplace</p>
@@ -386,32 +482,71 @@ route("/", async (params, query) => {
 
     <div class="filters" id="filters">
       <span class="chip ${!query.category ? "active" : ""}" data-cat="">All</span>
-      ${cats.map(c => `<span class="chip ${query.category === c.slug ? "active" : ""}" data-cat="${c.slug}">${escapeHtml(c.name)}</span>`).join("")}
+      ${cats.map(c => `<span class="chip ${isCat(c.slug) ? "active" : ""}" data-cat="${c.slug}">${escapeHtml(c.name)}</span>`).join("")}
     </div>
 
+    <div class="toolbar">
+      <input type="search" id="f-q" class="field" placeholder="Search title, description…" value="${escapeHtml(query.q || "")}">
+      <input type="text" id="f-tags" class="field" placeholder="Tags (comma sep)" value="${escapeHtml(query.tags || "")}">
+      <input type="text" id="f-tech" class="field" placeholder="Tech (comma sep)" value="${escapeHtml(query.tech_stack || "")}">
+      <select id="f-license" class="field">
+        <option value="">Any license</option>
+        ${licenses.map(l => `<option value="${l}" ${query.license_type === l ? "selected" : ""}>${l}</option>`).join("")}
+      </select>
+      <input type="number" id="f-min" class="field num" placeholder="Min UZS" value="${escapeHtml(query.min_price || "")}">
+      <input type="number" id="f-max" class="field num" placeholder="Max UZS" value="${escapeHtml(query.max_price || "")}">
+      <select id="f-sort" class="field">
+        ${sorts.map(s => `<option value="${s.v}" ${curSort === s.v ? "selected" : ""}>${s.label}</option>`).join("")}
+      </select>
+      <label class="field-check"><input type="checkbox" id="f-featured" ${query.featured ? "checked" : ""}> Editor's picks</label>
+      <button class="btn btn-sm" id="clear-filters">Clear</button>
+    </div>
+
+    <p class="muted" style="margin:14px 0 0;font-size:13px;">${items.length} listing${items.length === 1 ? "" : "s"}</p>
+
     <div class="grid" id="grid">
-      ${items.length ? items.map(cardHtml).join("") : `<div class="empty">No listings match yet. Try a different search or check back soon.</div>`}
+      ${items.length ? items.map(cardHtml).join("") : `<div class="empty">No listings match your filters. Try widening your search.</div>`}
     </div>
   `;
 
   document.querySelectorAll("#filters .chip").forEach(chip => {
-    chip.onclick = () => {
-      const cat = chip.dataset.cat;
-      location.hash = "#/" + (cat ? `?category=${cat}` : "");
-    };
+    chip.onclick = () => updateQuery({ category: chip.dataset.cat || "" });
   });
+  const applyFilters = () => updateQuery({
+    q: document.getElementById("f-q").value.trim(),
+    tags: document.getElementById("f-tags").value.trim(),
+    tech_stack: document.getElementById("f-tech").value.trim(),
+    license_type: document.getElementById("f-license").value,
+    min_price: document.getElementById("f-min").value.trim(),
+    max_price: document.getElementById("f-max").value.trim(),
+    ordering: document.getElementById("f-sort").value,
+    featured: document.getElementById("f-featured").checked ? "1" : "",
+  }, false);
+  ["f-q", "f-tags", "f-tech", "f-license", "f-min", "f-max", "f-sort"].forEach(id => {
+    document.getElementById(id).addEventListener("change", applyFilters);
+    if (id === "f-q") document.getElementById(id).addEventListener("keydown", e => { if (e.key === "Enter") applyFilters(); });
+  });
+  document.getElementById("f-featured").addEventListener("change", applyFilters);
+  document.getElementById("clear-filters").onclick = () => {
+    location.hash = query.q ? `#/?q=${encodeURIComponent(query.q)}` : "#/";
+  };
   document.querySelectorAll("#grid .card").forEach(card => {
     card.onclick = () => location.hash = "#/listing/" + card.dataset.slug;
   });
 });
 
 function cardHtml(p){
+  const media = p.banner_image || p.cover_image;
   return `
     <div class="card" data-slug="${p.slug}">
-      <div class="thumb">${p.cover_image ? `<img src="${p.cover_image}" alt="">` : "no preview"}</div>
-      <h3>${escapeHtml(p.title)}</h3>
-      <div class="tags">${(p.tech_stack || []).slice(0, 3).map(t => `<span class="tag">${escapeHtml(t)}</span>`).join("")}</div>
-      <div class="price">${money(p.price)} UZS</div>
+      <div class="thumb">${media ? `<img src="${media}" alt="">` : "no preview"}</div>
+      <div class="card-body">
+        ${p.featured ? `<span class="badge featured">★ Editor's pick</span>` : ""}
+        <h3>${escapeHtml(p.title)}</h3>
+        ${(p.highlights && p.highlights.length) ? `<p class="card-hl">${escapeHtml(p.highlights[0])}</p>` : ""}
+        <div class="tags">${(p.tech_stack || []).slice(0, 3).map(t => `<span class="tag">${escapeHtml(t)}</span>`).join("")}</div>
+        <div class="price">${money(p.price)} UZS</div>
+      </div>
     </div>
   `;
 }
@@ -424,27 +559,35 @@ route("/listing/:slug", async (params) => {
   const p = await api(`/api/listings/${params.slug}/`);
 
   app.innerHTML = `
+    <style id="product-accent"></style>
+    ${p.banner_image ? `<div class="banner"><img src="${escapeHtml(p.banner_image)}" alt=""></div>` : ""}
     <div class="detail-top">
       <div>
-        <p class="eyebrow">${escapeHtml(p.category_name || "project")}</p>
+        <p class="eyebrow">${escapeHtml(p.category_name || "project")}${p.featured ? " · <span class=\"featured-text\">★ Editor's pick</span>" : ""}</p>
         <h1>${escapeHtml(p.title)}</h1>
         <div class="tags" style="margin:10px 0 18px;">${(p.tech_stack || []).map(t => `<span class="tag">${escapeHtml(t)}</span>`).join("")}</div>
-        ${p.screenshots && p.screenshots.length ? `<div class="shots">${p.screenshots.map(s => `<img src="${s}" alt="">`).join("")}</div>` : ""}
+        ${(p.highlights && p.highlights.length) ? `
+          <ul class="highlights">
+            ${p.highlights.map(h => `<li>${escapeHtml(h)}</li>`).join("")}
+          </ul>` : ""}
+        ${p.screenshots && p.screenshots.length ? `<div class="shots">${p.screenshots.map(s => `<img src="${escapeHtml(s)}" alt="">`).join("")}</div>` : ""}
         <h2 style="margin-top:22px;">About this project</h2>
-        <p>${escapeHtml(p.description)}</p>
-        ${p.demo_url ? `<p><a class="btn" href="${p.demo_url}" target="_blank" rel="noopener">View live demo →</a></p>` : ""}
+        <div class="md">${renderMarkdown(p.description)}</div>
+        ${p.demo_url ? `<p><a class="btn" href="${escapeHtml(p.demo_url)}" target="_blank" rel="noopener">View live demo →</a></p>` : ""}
       </div>
       <div class="buybox">
         <div class="price">${money(p.price)} UZS</div>
         <button class="btn money" id="buy-btn" style="width:100%;">Buy & download</button>
         <div class="seller-row">
-          <img class="avatar" src="${(p.seller_profile && p.seller_profile.avatar_url) || ''}" alt="" onerror="this.style.visibility='hidden'">
+          <img class="avatar" src="${escapeHtml((p.seller_profile && p.seller_profile.avatar_url) || '')}" alt="" onerror="this.style.visibility='hidden'">
           <span>by ${escapeHtml((p.seller_profile && p.seller_profile.username) || "unknown seller")}</span>
         </div>
         <p class="muted" style="margin-top:14px;font-size:12px;">You get a snapshot of the source at time of purchase, plus this listing's license terms.</p>
       </div>
     </div>
   `;
+
+  applyAccent(p.accent_color);
 
   document.getElementById("buy-btn").onclick = async () => {
     if (!state.token) { toast("Log in first to buy.", true); return; }
@@ -681,6 +824,19 @@ route("/sell", async () => {
         <label>Tech stack (comma separated)
           <input type="text" id="f-tech" placeholder="Django, Telegram Bot API, Postgres" />
         </label>
+        <label>Tags (comma separated)
+          <input type="text" id="f-tags" placeholder="saas, starter, boilerplate" />
+        </label>
+        <label>Highlights (one per line — shown as selling points)
+          <textarea id="f-highlights" placeholder="One-click deploy&#10;Includes admin dashboard&#10;Documented API"></textarea>
+        </label>
+        <label>Banner image URL (wide hero for your product page, optional)
+          <input type="url" id="f-banner" placeholder="https://…/banner.png" />
+        </label>
+        <label>Accent color (themes your product page, optional)
+          <input type="color" id="f-accent" value="#3fd68c" style="width:48px;height:38px;padding:2px;background:var(--surface);border:1px solid var(--border);border-radius:8px;" />
+          <input type="text" id="f-accent-hex" value="#3fd68c" maxlength="7" style="width:90px;" />
+        </label>
         <label>Demo URL (optional)
           <input type="url" id="f-demo" placeholder="https://" />
         </label>
@@ -706,6 +862,11 @@ route("/sell", async () => {
     return;
   }
 
+  const accent = document.getElementById("f-accent");
+  const accentHex = document.getElementById("f-accent-hex");
+  accent.oninput = () => accentHex.value = accent.value;
+  accentHex.oninput = () => { if (/^#[0-9a-fA-F]{6}$/.test(accentHex.value)) accent.value = accentHex.value; };
+
   document.getElementById("listing-form").onsubmit = async (e) => {
     e.preventDefault();
     const payload = {
@@ -714,6 +875,10 @@ route("/sell", async () => {
       description: document.getElementById("f-description").value,
       price: document.getElementById("f-price").value,
       tech_stack: document.getElementById("f-tech").value.split(",").map(s => s.trim()).filter(Boolean),
+      tags: document.getElementById("f-tags").value.split(",").map(s => s.trim()).filter(Boolean),
+      highlights: document.getElementById("f-highlights").value.split("\n").map(s => s.trim()).filter(Boolean),
+      banner_image: document.getElementById("f-banner").value.trim() || null,
+      accent_color: accentHex.value.trim() || "#3fd68c",
       demo_url: document.getElementById("f-demo").value || null,
     };
     try {

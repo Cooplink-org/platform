@@ -6,47 +6,119 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     initial = True
 
     dependencies = [
-        ('listings', '0003_build_orders_payments'),
+        ("listings", "0003_build_orders_payments"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
     operations = [
         migrations.CreateModel(
-            name='Order',
+            name="Order",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('price_at_purchase', models.DecimalField(decimal_places=2, max_digits=12)),
-                ('platform_fee_percent', models.DecimalField(decimal_places=2, default=10.0, max_digits=5)),
-                ('platform_fee_amount', models.DecimalField(decimal_places=2, max_digits=12)),
-                ('seller_earning_amount', models.DecimalField(decimal_places=2, max_digits=12)),
-                ('status', models.CharField(choices=[('pending_payment', 'Pending Payment'), ('paid', 'Paid'), ('failed', 'Failed'), ('refunded', 'Refunded')], default='pending_payment', max_length=20)),
-                ('payment_ref', models.CharField(blank=True, max_length=255, null=True)),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('paid_at', models.DateTimeField(blank=True, null=True)),
-                ('buyer', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='orders_as_buyer', to=settings.AUTH_USER_MODEL)),
-                ('project', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='orders', to='listings.project')),
-                ('seller', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='orders_as_seller', to=settings.AUTH_USER_MODEL)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                ("price_at_purchase", models.DecimalField(decimal_places=2, max_digits=12)),
+                (
+                    "platform_fee_percent",
+                    models.DecimalField(decimal_places=2, default=10.0, max_digits=5),
+                ),
+                ("platform_fee_amount", models.DecimalField(decimal_places=2, max_digits=12)),
+                ("seller_earning_amount", models.DecimalField(decimal_places=2, max_digits=12)),
+                (
+                    "status",
+                    models.CharField(
+                        choices=[
+                            ("pending_payment", "Pending Payment"),
+                            ("paid", "Paid"),
+                            ("failed", "Failed"),
+                            ("refunded", "Refunded"),
+                        ],
+                        default="pending_payment",
+                        max_length=20,
+                    ),
+                ),
+                ("payment_ref", models.CharField(blank=True, max_length=255, null=True)),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("paid_at", models.DateTimeField(blank=True, null=True)),
+                (
+                    "buyer",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="orders_as_buyer",
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
+                (
+                    "project",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="orders",
+                        to="listings.project",
+                    ),
+                ),
+                (
+                    "seller",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="orders_as_seller",
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
             ],
             options={
-                'ordering': ['-created_at'],
+                "ordering": ["-created_at"],
             },
         ),
         migrations.CreateModel(
-            name='Transaction',
+            name="Transaction",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('type', models.CharField(choices=[('sale_earning', 'Sale Earning'), ('platform_fee', 'Platform Fee'), ('refund', 'Refund'), ('payout', 'Payout')], max_length=20)),
-                ('amount', models.DecimalField(decimal_places=2, max_digits=12)),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('order', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='transactions', to='orders.order')),
-                ('user', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='transactions', to=settings.AUTH_USER_MODEL)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                (
+                    "type",
+                    models.CharField(
+                        choices=[
+                            ("sale_earning", "Sale Earning"),
+                            ("platform_fee", "Platform Fee"),
+                            ("refund", "Refund"),
+                            ("payout", "Payout"),
+                        ],
+                        max_length=20,
+                    ),
+                ),
+                ("amount", models.DecimalField(decimal_places=2, max_digits=12)),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                (
+                    "order",
+                    models.ForeignKey(
+                        blank=True,
+                        null=True,
+                        on_delete=django.db.models.deletion.SET_NULL,
+                        related_name="transactions",
+                        to="orders.order",
+                    ),
+                ),
+                (
+                    "user",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="transactions",
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
             ],
             options={
-                'ordering': ['-created_at'],
+                "ordering": ["-created_at"],
             },
         ),
     ]

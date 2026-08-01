@@ -7,16 +7,16 @@ from .models import Transaction
 
 
 def _refund_sum(user):
-    result = Transaction.objects.filter(
-        user=user, type=Transaction.Type.REFUND
-    ).aggregate(total=Sum("amount"))
+    result = Transaction.objects.filter(user=user, type=Transaction.Type.REFUND).aggregate(
+        total=Sum("amount")
+    )
     return result["total"] or 0
 
 
 def _payout_sum(user):
-    result = Transaction.objects.filter(
-        user=user, type=Transaction.Type.PAYOUT
-    ).aggregate(total=Sum("amount"))
+    result = Transaction.objects.filter(user=user, type=Transaction.Type.PAYOUT).aggregate(
+        total=Sum("amount")
+    )
     return result["total"] or 0
 
 
@@ -43,9 +43,11 @@ def pending_balance(user):
 
     items = []
     for tx in qs:
-        items.append({
-            "amount": tx.amount,
-            "created_at": tx.created_at,
-            "unlocks_at": tx.created_at + timedelta(days=7),
-        })
+        items.append(
+            {
+                "amount": tx.amount,
+                "created_at": tx.created_at,
+                "unlocks_at": tx.created_at + timedelta(days=7),
+            }
+        )
     return items

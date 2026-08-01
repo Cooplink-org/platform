@@ -4,15 +4,18 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('listings', '0004_project_download_count'),
+        ("listings", "0004_project_download_count"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='project',
-            name='terms_accepted_at',
-            field=models.DateTimeField(blank=True, help_text='Timestamp when the seller accepted the terms during submission', null=True),
+            model_name="project",
+            name="terms_accepted_at",
+            field=models.DateTimeField(
+                blank=True,
+                help_text="Timestamp when the seller accepted the terms during submission",
+                null=True,
+            ),
         ),
     ]

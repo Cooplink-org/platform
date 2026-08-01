@@ -1,4 +1,5 @@
 import os
+
 from celery import Celery
 
 # Set default settings module
@@ -11,6 +12,7 @@ app.config_from_object("django.conf:settings", namespace="CELERY")
 
 # Discover tasks in all apps
 app.autodiscover_tasks()
+
 
 @app.task(bind=True, ignore_result=True)
 def debug_task(self):

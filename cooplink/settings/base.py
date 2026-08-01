@@ -1,6 +1,7 @@
-import environ
-from pathlib import Path
 from datetime import timedelta
+from pathlib import Path
+
+import environ
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -8,10 +9,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 # Initialize environment variables
 env = environ.Env(
     DEBUG=(bool, False),
-    SECRET_KEY=(str, "django-insecure-e^xshk3zj&vqh7=l0qv-2bfd$e=%ns^1ke58$4bod_9@(pj5_k"),
-    ALLOWED_HOSTS=(list, ["*"]),
-    CORS_ALLOWED_ORIGINS=(list, []),
-    CORS_ALLOW_ALL_ORIGINS=(bool, True),  # default to True for easy development, overridden in prod if needed
+    SECRET_KEY=(str, ""),
+    ALLOWED_HOSTS=(list, []),
+    CORS_ALLOWED_ORIGINS=(list, ["http://localhost:3000"]),
+    CORS_ALLOW_ALL_ORIGINS=(bool, False),
     CELERY_BROKER_URL=(str, "redis://localhost:6379/0"),
     CELERY_RESULT_BACKEND=(str, "redis://localhost:6379/0"),
     GITHUB_CLIENT_ID=(str, ""),
@@ -24,6 +25,10 @@ env = environ.Env(
     TELEGRAM_BOT_TOKEN=(str, ""),
     TELEGRAM_API_ID=(str, ""),
     TELEGRAM_API_HASH=(str, ""),
+    TELEGRAM_BOT_USERNAME=(str, "cooplink_bot"),
+    TELEGRAM_WEBHOOK_SECRET=(str, ""),
+    TELEGRAM_BOT_API_SECRET_TOKEN=(str, ""),
+    TELEGRAM_WEBHOOK_BASE_URL=(str, ""),
 )
 
 # Read .env file if it exists
@@ -33,13 +38,35 @@ SECRET_KEY = env("SECRET_KEY")
 DEBUG = env("DEBUG")
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")
 
+# Refuse to start with an empty SECRET_KEY — this would silently break
+# JWT signing, session cookies, and password reset tokens.
+if not SECRET_KEY:
+    raise ValueError(
+        "SECRET_KEY is not set. Set it via the SECRET_KEY environment variable "
+        "or a .env file. Generate one with: "
+        'python -c "from django.core.management.utils import '
+        'get_random_secret_key; print(get_random_secret_key())"'
+    )
+
+# Warn (don't crash) if FERNET_KEY is missing — it's only needed when a seller
+# connects GitHub repos or a payout request encrypts a card number.
+FERNET_KEY = env("FERNET_KEY")
+if not FERNET_KEY and not DEBUG:
+    import warnings
+
+    warnings.warn(
+        "FERNET_KEY is not set. GitHub token encryption and card number "
+        "encryption will fail at runtime. Generate one with: "
+        'python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"',
+        stacklevel=1,
+    )
+
 # Application definition
 INSTALLED_APPS = [
     # django-unfold must be before django.contrib.admin
     "unfold",
     "unfold.contrib.filters",
     "unfold.contrib.forms",
-    
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -47,12 +74,11 @@ INSTALLED_APPS = [
     "django.contrib.postgres",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-
     # Third-party packages
     "rest_framework",
     "rest_framework_simplejwt",
+    "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
-
     # Local apps
     "accounts",
     "listings",
@@ -61,6 +87,7 @@ INSTALLED_APPS = [
     "payouts",
     "dashboard",
     "notifications",
+    "moderation",
     "django_celery_beat",
 ]
 
@@ -72,6 +99,8 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "accounts.ip_middleware.IPTrackingMiddleware",
+    "accounts.middleware.OnboardingGateMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -127,6 +156,8 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+MEDIA_URL = "media/"
+MEDIA_ROOT = BASE_DIR / "media"
 STORAGES = {
     "default": {
         "BACKEND": "django.core.files.storage.FileSystemStorage",
@@ -141,21 +172,17 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Django REST Framework Configuration
 REST_FRAMEWORK = {
-    "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
-    ),
-    "DEFAULT_PERMISSION_CLASSES": (
-        "rest_framework.permissions.IsAuthenticated",
-    ),
+    "DEFAULT_AUTHENTICATION_CLASSES": ("accounts.permissions.ActiveUserJWTAuthentication",),
+    "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     "DEFAULT_THROTTLE_CLASSES": [
         "rest_framework.throttling.AnonRateThrottle",
-        "rest_framework.throttling.UserRateThrottle"
+        "rest_framework.throttling.UserRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
-        "anon": "100/day",
-        "user": "2000/day",
-        "burst": "10/minute",
-    }
+        "anon": "30/minute",
+        "user": "100/minute",
+        "burst": "30/minute",
+    },
 }
 
 # SimpleJWT JWT Auth Settings
@@ -163,7 +190,7 @@ SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
     "ROTATE_REFRESH_TOKENS": True,
-    "BLACKLIST_AFTER_ROTATION": False,
+    "BLACKLIST_AFTER_ROTATION": True,
     "ALGORITHM": "HS256",
     "SIGNING_KEY": SECRET_KEY,
     "VERIFYING_KEY": None,
@@ -175,6 +202,7 @@ SIMPLE_JWT = {
 # CORS headers Configuration
 CORS_ALLOWED_ORIGINS = env("CORS_ALLOWED_ORIGINS")
 CORS_ALLOW_ALL_ORIGINS = env("CORS_ALLOW_ALL_ORIGINS")
+CORS_ALLOW_CREDENTIALS = True
 
 # Celery Configurations
 CELERY_BROKER_URL = env("CELERY_BROKER_URL")
@@ -187,10 +215,37 @@ CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 # Explicitly set to avoid Celery 5.1 pending deprecation warning
 # In Celery 5.1 this defaults to False but will be True in 6.0
 CELERY_WORKER_CANCEL_LONG_RUNNING_TASKS_ON_CONNECTION_LOSS = False
+# Keep the broker connection alive — managed Redis (e.g. Upstash) kills idle
+# sockets after a few minutes, which crashes the worker on reconnect.
+CELERY_BROKER_HEARTBEAT = 30
+CELERY_BROKER_CONNECTION_TIMEOUT = 30
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    # Upstash closes idle connections after ~60 s; use short socket timeout so
+    # Kombu detects the drop quickly and reconnects rather than hanging.
+    "socket_timeout": 5,
+    "socket_connect_timeout": 5,
+    "socket_keepalive": True,
+    # visibility_timeout must be >= the longest expected task runtime (seconds).
+    # 3600 = 1 hour; tasks that take longer should use task.update_state heartbeats.
+    "visibility_timeout": 3600,
+    # Back off gently on reconnect so we don't hammer Upstash.
+    "interval_start": 0,
+    "interval_step": 0.5,
+    "interval_max": 5,
+    "retry_policy": {
+        "timeout": 30,
+        "max_retries": 10,
+    },
+}
 CELERY_BEAT_SCHEDULE = {
     "check-unlocked-earnings-daily": {
         "task": "notifications.tasks.daily_check_unlocked_earnings",
         "schedule": 86400.0,  # 24 hours in seconds
+    },
+    "cleanup-expired-telegram-tokens": {
+        "task": "notifications.tasks.cleanup_expired_telegram_tokens",
+        "schedule": 3600.0,  # every hour
     },
 }
 
@@ -198,36 +253,91 @@ CELERY_BEAT_SCHEDULE = {
 UNFOLD = {
     "SITE_TITLE": "Cooplink Admin",
     "SITE_HEADER": "Cooplink Admin",
+    "SITE_URL": "/admin/",
     "DASHBOARD_CALLBACK": "dashboard.admin_dashboard.dashboard_callback",
+    "COLORS": {
+        "primary": {
+            50: "#f0fdf4",
+            100: "#dcfce7",
+            200: "#bbf7d0",
+            300: "#86efac",
+            400: "#4ade80",
+            500: "#22c55e",
+            600: "#16a34a",
+            700: "#15803d",
+            800: "#166534",
+            900: "#14532d",
+            950: "#052e16",
+        },
+    },
+    "EXTENSIONS": {
+        "unfold.extensions.history.HistoryExtension": {},
+    },
     "SIDEBAR": {
         "show_search": True,
-        "show_all_applications": True,
+        "show_all_applications": False,
         "navigation": [
+            {
+                "title": "Dashboard",
+                "separator": False,
+                "collapsible": False,
+                "items": [
+                    {
+                        "title": "Overview",
+                        "icon": "dashboard",
+                        "link": "/admin/",
+                    },
+                ],
+            },
             {
                 "title": "Marketplace",
                 "separator": True,
+                "collapsible": True,
                 "items": [
                     {
                         "title": "Projects",
-                        "icon": "inventory_2",  # Material icon name
+                        "icon": "inventory_2",
                         "link": "/admin/listings/project/",
                     },
+                    {
+                        "title": "Categories",
+                        "icon": "category",
+                        "link": "/admin/listings/category/",
+                    },
+                    {
+                        "title": "Snapshots",
+                        "icon": "photo_library",
+                        "link": "/admin/listings/projectsnapshot/",
+                    },
+                ],
+            },
+            {
+                "title": "Orders & Payments",
+                "separator": True,
+                "collapsible": True,
+                "items": [
                     {
                         "title": "Orders",
                         "icon": "shopping_cart",
                         "link": "/admin/orders/order/",
                     },
-                ],
-            },
-            {
-                "title": "Financials",
-                "separator": True,
-                "items": [
                     {
                         "title": "Ledger",
                         "icon": "account_balance_wallet",
                         "link": "/admin/orders/transaction/",
                     },
+                    {
+                        "title": "Webhook Logs",
+                        "icon": "webhook",
+                        "link": "/admin/payments/webhooklog/",
+                    },
+                ],
+            },
+            {
+                "title": "Payouts",
+                "separator": True,
+                "collapsible": True,
+                "items": [
                     {
                         "title": "Payout Requests",
                         "icon": "payments",
@@ -236,18 +346,68 @@ UNFOLD = {
                 ],
             },
             {
-                "title": "Users",
+                "title": "Users & Accounts",
                 "separator": True,
+                "collapsible": True,
                 "items": [
                     {
                         "title": "Users",
                         "icon": "people",
                         "link": "/admin/accounts/user/",
                     },
+                    {
+                        "title": "Telegram Tokens",
+                        "icon": "send",
+                        "link": "/admin/notifications/telegramlinkingtoken/",
+                    },
+                    {
+                        "title": "Phone Verifications",
+                        "icon": "phone_android",
+                        "link": "/admin/notifications/phoneverificationcode/",
+                    },
+                ],
+            },
+            {
+                "title": "Moderation",
+                "separator": True,
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": "Reports",
+                        "icon": "flag",
+                        "link": "/admin/moderation/report/",
+                    },
+                    {
+                        "title": "Audit Log",
+                        "icon": "history",
+                        "link": "/admin/moderation/moderationlog/",
+                    },
                 ],
             },
         ],
     },
+    "TABS": [
+        {
+            "title": "Platform",
+            "items": [
+                {
+                    "title": "Projects",
+                    "link": "/admin/listings/project/",
+                    "permission": lambda request: request.user.is_staff,
+                },
+                {
+                    "title": "Orders",
+                    "link": "/admin/orders/order/",
+                    "permission": lambda request: request.user.is_staff,
+                },
+                {
+                    "title": "Users",
+                    "link": "/admin/accounts/user/",
+                    "permission": lambda request: request.user.is_staff,
+                },
+            ],
+        },
+    ],
 }
 
 # Custom User Model
@@ -260,22 +420,68 @@ GITHUB_CLIENT_SECRET = env("GITHUB_CLIENT_SECRET")
 # The flow is identified by the `state` param GitHub round-trips unchanged.
 GITHUB_CALLBACK_URL = env("GITHUB_CALLBACK_URL")
 
-# Fernet key for encrypting GitHub access tokens at rest.
-# Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-FERNET_KEY = env("FERNET_KEY")
-
 # Frontend URL for OAuth redirects
 FRONTEND_URL = env("FRONTEND_URL")
+
+# Current Terms of Service / Privacy Policy version.
+# Bump this string whenever the legal documents change.
+# Users whose terms_accepted_version != CURRENT_TERMS_VERSION will be gated
+# by the onboarding middleware until they accept the new version.
+CURRENT_TERMS_VERSION = "2025-07-v1"
 
 # MirPay.uz Payment Gateway Credentials
 MIRPAY_KASSA_ID = env("MIRPAY_KASSA_ID")
 MIRPAY_API_KEY = env("MIRPAY_API_KEY")
 
-# Redis cache backend (shared Redis instance)
+# Redis cache backend (shared Redis instance).
+# OPTIONS: use short socket timeouts so a dropped Upstash idle connection
+# raises immediately instead of hanging the request thread for 30+ seconds.
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
         "LOCATION": CELERY_BROKER_URL,
         "KEY_PREFIX": "cooplink",
+        "OPTIONS": {
+            "socket_timeout": 5,
+            "socket_connect_timeout": 5,
+            "retry_on_timeout": False,
+        },
     }
+}
+
+# Logging
+# Default Django logging hides INFO messages from app loggers, which is why
+# MirPay webhook/verification activity never showed up in the console. Enable
+# console logging at INFO for the payment-critical loggers so every payment
+# event (webhook raw body, check_status response, order confirmations) is
+# visible during development and diagnosis.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "simple": {
+            "format": "{asctime} {levelname} {name} {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "simple",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "WARNING",
+    },
+    "loggers": {
+        # Payment lifecycle — MUST be visible: webhook bodies, check_status,
+        # order confirmation/failure decisions.
+        "payments": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        "orders": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        "notifications.tasks": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        # Incoming HTTP requests (incl. MirPay webhooks) — one line per request.
+        "django.server": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        "django.request": {"handlers": ["console"], "level": "INFO", "propagate": False},
+    },
 }

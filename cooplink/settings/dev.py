@@ -1,4 +1,2 @@
-from .base import *
-
-# Development settings
+# Development settings — overrides base.py
 DEBUG = True

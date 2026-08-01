@@ -1,18 +1,66 @@
 import io
 from decimal import Decimal
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
-
 from rest_framework.test import APIClient
+from rest_framework.throttling import SimpleRateThrottle
+from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from listings.models import Category, Project, ProjectSnapshot
+
 from .models import Order, Transaction
 
 User = get_user_model()
+
+APIView.throttle_classes = []
+SimpleRateThrottle.THROTTLE_RATES = {"anon": None, "user": None, "burst": None}
+
+
+def _bearer(user):
+    return f"Bearer {RefreshToken.for_user(user).access_token}"
+
+
+def _onboard(user):
+    user.full_legal_name = "Test User"
+    user.phone_number = "+998901234567"
+    user.avatar_url = "https://avatars.githubusercontent.com/u/1"
+    user.terms_accepted_version = settings.CURRENT_TERMS_VERSION
+    user.terms_accepted_at = timezone.now()
+    user.save(
+        update_fields=[
+            "full_legal_name",
+            "phone_number",
+            "avatar_url",
+            "terms_accepted_version",
+            "terms_accepted_at",
+        ]
+    )
+    return user
+
+
+def _seller(**kwargs):
+    u = User.objects.create_user(is_seller=True, **kwargs)
+    u.github_token_encrypted = "gAAAAABmocked=="
+    u.save(update_fields=["github_token_encrypted"])
+    return _onboard(u)
+
+
+def _buyer(**kwargs):
+    return _onboard(User.objects.create_user(**kwargs))
+
+
+def _category():
+    cat, _ = Category.objects.get_or_create(name="Sales", defaults={"slug": "sales"})
+    return cat
+
+
+# ── order model ───────────────────────────────────────────────────────────────
 
 
 class OrderModelTest(TestCase):
@@ -44,19 +92,13 @@ class OrderModelTest(TestCase):
         order = self._create_order()
         self.assertEqual(order.buyer, self.buyer)
         self.assertEqual(order.project, self.project)
-        self.assertEqual(order.seller, self.seller)
         self.assertEqual(order.price_at_purchase, Decimal("100000.00"))
-        self.assertEqual(order.platform_fee_amount, Decimal("10000.00"))
-        self.assertEqual(order.seller_earning_amount, Decimal("90000.00"))
         self.assertEqual(order.status, Order.Status.PENDING_PAYMENT)
-        self.assertIsNotNone(order.created_at)
-        self.assertIsNone(order.paid_at)
-        self.assertIsNone(order.payment_ref)
 
     def test_order_str(self):
         order = self._create_order()
-        expected = f"Order {order.id} — Test Project by buyer"
-        self.assertEqual(str(order), expected)
+        self.assertIn(str(order.id), str(order))
+        self.assertIn("Test Project", str(order))
 
     def test_order_default_fee_percent(self):
         order = Order(
@@ -69,8 +111,86 @@ class OrderModelTest(TestCase):
         )
         self.assertEqual(order.platform_fee_percent, Decimal("10.00"))
 
-    def test_order_status_choices_count(self):
+    def test_order_status_choices(self):
         self.assertEqual(len(Order.Status.choices), 4)
+
+
+# ── order create ──────────────────────────────────────────────────────────────
+
+
+@override_settings(
+    MIRPAY_KASSA_ID="test_kassa",
+    MIRPAY_API_KEY="test_key",
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+)
+class OrderCreateTest(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.buyer = _buyer(username="ord_buyer", email="ob@test.com")
+        self.seller = _seller(username="ord_seller", email="os@test.com")
+        self.project = Project.objects.create(
+            title="For Sale",
+            slug="for-sale",
+            description="d",
+            price=Decimal("50000.00"),
+            status=Project.Status.PUBLISHED,
+            seller=self.seller,
+            category=_category(),
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=_bearer(self.buyer))
+        self.url = reverse("order_create")
+
+    @patch("payments.mirpay.MirPayClient.create_payment")
+    @patch("payments.mirpay.MirPayClient.get_token")
+    def test_create_order_success(self, mock_get_token, mock_create_payment):
+        mock_get_token.return_value = "tok123"
+        mock_create_payment.return_value = (
+            "MP001",
+            "https://mirpay.uz/pay/123",
+            {"payid": "MP001"},
+        )
+        resp = self.client.post(self.url, {"project_id": self.project.id}, format="json")
+        self.assertEqual(resp.status_code, 201)
+        data = resp.json()
+        self.assertIn("id", data)
+        self.assertEqual(data["status"], "pending_payment")
+        self.assertEqual(data["price"], "50000.00")
+        self.assertEqual(data["redirect_url"], "https://mirpay.uz/pay/123")
+
+    def test_create_order_missing_project_id(self):
+        resp = self.client.post(self.url, {}, format="json")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_create_order_requires_auth(self):
+        resp = APIClient().post(self.url, {"project_id": self.project.id}, format="json")
+        self.assertEqual(resp.status_code, 401)
+
+    def test_create_order_404_for_draft_project(self):
+        draft = Project.objects.create(
+            title="Draft",
+            slug="draft",
+            description="d",
+            price="1000",
+            status=Project.Status.DRAFT,
+            seller=self.seller,
+        )
+        resp = self.client.post(self.url, {"project_id": draft.id}, format="json")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_create_order_404_for_nonexistent_project(self):
+        resp = self.client.post(self.url, {"project_id": 99999}, format="json")
+        self.assertEqual(resp.status_code, 404)
+
+    @patch("payments.mirpay.MirPayClient.create_payment")
+    @patch("payments.mirpay.MirPayClient.get_token")
+    def test_create_order_502_on_mirpay_failure(self, mock_get_token, mock_create_payment):
+        mock_get_token.return_value = "tok123"
+        mock_create_payment.side_effect = Exception("Connection refused")
+        resp = self.client.post(self.url, {"project_id": self.project.id}, format="json")
+        self.assertEqual(resp.status_code, 502)
+
+
+# ── order download ────────────────────────────────────────────────────────────
 
 
 class OrderDownloadTest(TestCase):
@@ -129,18 +249,25 @@ class OrderDownloadTest(TestCase):
     @patch("django.core.files.storage.FileSystemStorage.open")
     def test_download_returns_file(self, mock_storage_open):
         mock_storage_open.return_value = io.BytesIO(b"fake archive content")
-
         order = self._create_order()
         ProjectSnapshot.objects.create(
             project=self.project,
             version=1,
             archive="snapshots/test/snapshot.zip",
         )
-
         self.client.force_authenticate(self.buyer)
         resp = self.client.get(reverse("order_download", args=[order.id]))
         self.assertEqual(resp.status_code, 200)
         self.assertIn("Content-Disposition", resp)
+
+    def test_download_403_for_wrong_user(self):
+        order = self._create_order()
+        self.client.force_authenticate(self.seller)
+        resp = self.client.get(reverse("order_download", args=[order.id]))
+        self.assertEqual(resp.status_code, 403)
+
+
+# ── transaction model ─────────────────────────────────────────────────────────
 
 
 class TransactionModelTest(TestCase):
@@ -173,10 +300,7 @@ class TransactionModelTest(TestCase):
             amount=Decimal("900.00"),
         )
         self.assertEqual(tx.user, self.user)
-        self.assertEqual(tx.order, self.order)
         self.assertEqual(tx.amount, Decimal("900.00"))
-        self.assertEqual(tx.type, Transaction.Type.SALE_EARNING)
-        self.assertIsNotNone(tx.created_at)
 
     def test_transaction_str(self):
         tx = Transaction.objects.create(

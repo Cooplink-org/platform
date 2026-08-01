@@ -5,26 +5,56 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('listings', '0002_add_view_count_seed_categories'),
+        ("listings", "0002_add_view_count_seed_categories"),
     ]
 
     operations = [
         migrations.CreateModel(
-            name='ProjectSnapshot',
+            name="ProjectSnapshot",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('version', models.PositiveIntegerField(editable=False)),
-                ('archive', models.FileField(help_text='Compressed archive of the project source code', upload_to='snapshots/%Y/%m/%d/')),
-                ('file_size', models.PositiveIntegerField(blank=True, help_text='Size of the archive in bytes', null=True)),
-                ('checksum', models.CharField(blank=True, help_text='SHA-256 checksum of the archive', max_length=64, null=True)),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('project', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='snapshots', to='listings.project')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                ("version", models.PositiveIntegerField(editable=False)),
+                (
+                    "archive",
+                    models.FileField(
+                        help_text="Compressed archive of the project source code",
+                        upload_to="snapshots/%Y/%m/%d/",
+                    ),
+                ),
+                (
+                    "file_size",
+                    models.PositiveIntegerField(
+                        blank=True, help_text="Size of the archive in bytes", null=True
+                    ),
+                ),
+                (
+                    "checksum",
+                    models.CharField(
+                        blank=True,
+                        help_text="SHA-256 checksum of the archive",
+                        max_length=64,
+                        null=True,
+                    ),
+                ),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                (
+                    "project",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="snapshots",
+                        to="listings.project",
+                    ),
+                ),
             ],
             options={
-                'ordering': ['-version'],
-                'unique_together': {('project', 'version')},
+                "ordering": ["-version"],
+                "unique_together": {("project", "version")},
             },
         ),
     ]

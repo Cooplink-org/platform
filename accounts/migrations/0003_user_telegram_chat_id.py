@@ -4,15 +4,19 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('accounts', '0002_user_github_token_encrypted'),
+        ("accounts", "0002_user_github_token_encrypted"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='user',
-            name='telegram_chat_id',
-            field=models.CharField(blank=True, help_text='Optional chat ID for notifications', max_length=100, null=True),
+            model_name="user",
+            name="telegram_chat_id",
+            field=models.CharField(
+                blank=True,
+                help_text="Optional chat ID for notifications",
+                max_length=100,
+                null=True,
+            ),
         ),
     ]

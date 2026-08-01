@@ -3,7 +3,7 @@
 from django.db import migrations, models
 
 
-def seed_categories(apps, schema_editor):
+def seed_categories(apps, _schema_editor):
     Category = apps.get_model("listings", "Category")
     categories = [
         ("Telegram bots", "telegram-bots"),
@@ -22,7 +22,6 @@ def noop(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("listings", "0001_initial"),
     ]

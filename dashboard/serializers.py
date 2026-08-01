@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
-from orders.models import Order
 from listings.models import Project
+from orders.models import Order
 
 
 class DashboardOrderSerializer(serializers.ModelSerializer):
@@ -12,9 +12,16 @@ class DashboardOrderSerializer(serializers.ModelSerializer):
     class Meta:
         model = Order
         fields = [
-            "id", "buyer_username", "project_title", "project_slug",
-            "price_at_purchase", "platform_fee_amount", "seller_earning_amount",
-            "status", "created_at", "paid_at",
+            "id",
+            "buyer_username",
+            "project_title",
+            "project_slug",
+            "price_at_purchase",
+            "platform_fee_amount",
+            "seller_earning_amount",
+            "status",
+            "created_at",
+            "paid_at",
         ]
 
 
@@ -25,9 +32,17 @@ class DashboardProjectSerializer(serializers.ModelSerializer):
     class Meta:
         model = Project
         fields = [
-            "id", "title", "slug", "price", "status",
-            "view_count", "download_count", "sales_count", "revenue",
-            "created_at", "updated_at",
+            "id",
+            "title",
+            "slug",
+            "price",
+            "status",
+            "view_count",
+            "download_count",
+            "sales_count",
+            "revenue",
+            "created_at",
+            "updated_at",
         ]
 
 

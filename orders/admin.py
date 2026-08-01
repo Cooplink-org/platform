@@ -3,15 +3,14 @@ from datetime import timedelta
 from django.contrib import admin, messages
 from django.db import transaction as db_transaction
 from django.utils import timezone
-
 from unfold.admin import ModelAdmin
 
 from .models import Order, Transaction
 
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Transaction — read-only ledger.  Nothing here should be editable by hand.
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 @admin.register(Transaction)
 class TransactionAdmin(ModelAdmin):
@@ -26,15 +25,15 @@ class TransactionAdmin(ModelAdmin):
         "created_at",
     )
 
-    def has_add_permission(self, request):
+    def has_add_permission(self, _request):
         """Ledger entries are created programmatically — never by hand."""
         return False
 
-    def has_change_permission(self, request, obj=None):
+    def has_change_permission(self, _request, _obj=None):
         """Ledger is immutable."""
         return False
 
-    def has_delete_permission(self, request, obj=None):
+    def has_delete_permission(self, _request, _obj=None):
         """Ledger entries must never be removed."""
         return False
 
@@ -42,6 +41,7 @@ class TransactionAdmin(ModelAdmin):
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Order — with a "Refund selected" admin action
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 @admin.register(Order)
 class OrderAdmin(ModelAdmin):
@@ -51,6 +51,7 @@ class OrderAdmin(ModelAdmin):
         "seller",
         "status",
         "price_at_purchase",
+        "downloaded_at",
         "created_at",
     )
     list_filter = ("status", "created_at")
@@ -60,7 +61,7 @@ class OrderAdmin(ModelAdmin):
         "project__title",
         "payment_ref",
     )
-    readonly_fields = ("created_at", "paid_at")
+    readonly_fields = ("created_at", "paid_at", "downloaded_at")
     autocomplete_fields = ["buyer", "seller", "project"]
     date_hierarchy = "created_at"
 

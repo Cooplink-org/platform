@@ -5,26 +5,38 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     initial = True
 
     dependencies = [
-        ('orders', '0001_build_orders_payments'),
+        ("orders", "0001_build_orders_payments"),
     ]
 
     operations = [
         migrations.CreateModel(
-            name='WebhookLog',
+            name="WebhookLog",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('endpoint', models.CharField(max_length=100)),
-                ('raw_body', models.TextField()),
-                ('verification_response', models.JSONField(blank=True, null=True)),
-                ('received_at', models.DateTimeField(auto_now_add=True)),
-                ('matched_order', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, to='orders.order')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                ("endpoint", models.CharField(max_length=100)),
+                ("raw_body", models.TextField()),
+                ("verification_response", models.JSONField(blank=True, null=True)),
+                ("received_at", models.DateTimeField(auto_now_add=True)),
+                (
+                    "matched_order",
+                    models.ForeignKey(
+                        blank=True,
+                        null=True,
+                        on_delete=django.db.models.deletion.SET_NULL,
+                        to="orders.order",
+                    ),
+                ),
             ],
             options={
-                'ordering': ['-received_at'],
+                "ordering": ["-received_at"],
             },
         ),
     ]

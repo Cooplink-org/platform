@@ -4,15 +4,16 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('listings', '0003_build_orders_payments'),
+        ("listings", "0003_build_orders_payments"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='project',
-            name='download_count',
-            field=models.PositiveIntegerField(default=0, help_text='Incremented when a buyer downloads the project archive'),
+            model_name="project",
+            name="download_count",
+            field=models.PositiveIntegerField(
+                default=0, help_text="Incremented when a buyer downloads the project archive"
+            ),
         ),
     ]

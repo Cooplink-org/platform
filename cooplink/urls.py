@@ -1,7 +1,8 @@
 from django.contrib import admin
+from django.urls import include, path
 from django.views.generic.base import RedirectView
-from django.urls import path, include
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+
 from .views import health_check, serve_playground
 
 urlpatterns = [
@@ -32,4 +33,6 @@ urlpatterns = [
     path("api/payments/", include("payments.urls")),
     path("api/payouts/", include("payouts.urls")),
     path("api/dashboard/", include("dashboard.urls")),
+    path("api/moderation/", include("moderation.urls")),
+    path("api/telegram/", include("notifications.urls")),
 ]

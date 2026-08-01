@@ -1,19 +1,23 @@
-from django.http import JsonResponse, HttpResponse
+from pathlib import Path
+
 from django.conf import settings
+from django.http import Http404, HttpResponse, JsonResponse
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
-import os
+
 
 @api_view(["GET"])
 @permission_classes([AllowAny])
-def health_check(request):
+def health_check(_request):
     """
     Simple health check endpoint returning status code 200 and details.
     """
     return JsonResponse({"status": "healthy"})
 
-def serve_playground(request):
-    """Serve the dev playground index.html from the project root."""
-    path = os.path.join(settings.BASE_DIR, "index.html")
-    with open(path, "r", encoding="utf-8") as f:
-        return HttpResponse(f.read())
+
+def serve_playground(_request):
+    """Serve the dev playground index.html from the project root. Only in DEBUG mode."""
+    if not settings.DEBUG:
+        raise Http404
+    path = Path(settings.BASE_DIR) / "index.html"
+    return HttpResponse(path.read_text(encoding="utf-8"))

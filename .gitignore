@@ -29,3 +29,7 @@ snapshots/
 
 # uv / tooling caches
 .ruff_cache/
+
+# Frontend lives in a separate repo (Cooplink-org/devlink-forge)
+frontend/
+task.md

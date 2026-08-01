@@ -33,5 +33,6 @@ RUN uv run manage.py collectstatic --no-input
 # Expose port
 EXPOSE 8000
 
-# Run gunicorn
-CMD ["uv", "run", "gunicorn", "cooplink.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3"]
+# Run gunicorn — worker count from GUNICORN_WORKERS env (default: 2 for modest servers)
+ENV GUNICORN_WORKERS=2
+CMD uv run gunicorn cooplink.wsgi:application --bind 0.0.0.0:8000 --workers ${GUNICORN_WORKERS} --timeout 120

@@ -1,8 +1,5 @@
 from decimal import Decimal
 
-from django.db import transaction as db_transaction
-from django.shortcuts import get_object_or_404
-
 from rest_framework import serializers
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -10,6 +7,7 @@ from rest_framework.response import Response
 
 from accounts.utils import encrypt_token
 from orders.balance import available_balance, pending_balance
+
 from .models import PayoutRequest
 
 
@@ -78,8 +76,13 @@ def payout_list_mine(request):
     """
     user = request.user
     qs = PayoutRequest.objects.filter(seller=user).order_by("-requested_at")
-    return Response({
-        "available_balance": available_balance(user),
-        "pending_balance": [{"amount": p["amount"], "unlocks_at": p["unlocks_at"]} for p in pending_balance(user)],
-        "payouts": PayoutRequestSerializer(qs, many=True).data,
-    })
+    return Response(
+        {
+            "available_balance": available_balance(user),
+            "pending_balance": [
+                {"amount": p["amount"], "unlocks_at": p["unlocks_at"]}
+                for p in pending_balance(user)
+            ],
+            "payouts": PayoutRequestSerializer(qs, many=True).data,
+        }
+    )

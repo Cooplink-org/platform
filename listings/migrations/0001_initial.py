@@ -6,7 +6,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     initial = True
 
     dependencies = [
@@ -15,42 +14,94 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.CreateModel(
-            name='Category',
+            name="Category",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('name', models.CharField(max_length=100, unique=True)),
-                ('slug', models.SlugField(max_length=100, unique=True)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                ("name", models.CharField(max_length=100, unique=True)),
+                ("slug", models.SlugField(max_length=100, unique=True)),
             ],
             options={
-                'verbose_name_plural': 'categories',
-                'ordering': ['name'],
+                "verbose_name_plural": "categories",
+                "ordering": ["name"],
             },
         ),
         migrations.CreateModel(
-            name='Project',
+            name="Project",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('title', models.CharField(max_length=255)),
-                ('slug', models.SlugField(blank=True, max_length=300, unique=True)),
-                ('description', models.TextField()),
-                ('github_repo_full_name', models.CharField(max_length=255)),
-                ('github_default_branch', models.CharField(default='main', max_length=100)),
-                ('price', models.DecimalField(decimal_places=2, max_digits=12)),
-                ('tags', models.JSONField(blank=True, default=list)),
-                ('cover_image', models.URLField(blank=True, max_length=1000, null=True)),
-                ('screenshots', models.JSONField(blank=True, default=list)),
-                ('demo_url', models.URLField(blank=True, max_length=1000, null=True)),
-                ('tech_stack', models.JSONField(blank=True, default=list)),
-                ('license_type', models.CharField(choices=[('mit', 'MIT'), ('apache2', 'Apache 2.0'), ('gpl3', 'GPL 3.0'), ('proprietary', 'Proprietary'), ('other', 'Other')], default='proprietary', max_length=20)),
-                ('status', models.CharField(choices=[('draft', 'Draft'), ('pending_review', 'Pending Review'), ('published', 'Published'), ('rejected', 'Rejected'), ('suspended', 'Suspended')], default='draft', max_length=20)),
-                ('version', models.PositiveIntegerField(default=1)),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('updated_at', models.DateTimeField(auto_now=True)),
-                ('category', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='projects', to='listings.category')),
-                ('seller', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='projects', to=settings.AUTH_USER_MODEL)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                ("title", models.CharField(max_length=255)),
+                ("slug", models.SlugField(blank=True, max_length=300, unique=True)),
+                ("description", models.TextField()),
+                ("github_repo_full_name", models.CharField(max_length=255)),
+                ("github_default_branch", models.CharField(default="main", max_length=100)),
+                ("price", models.DecimalField(decimal_places=2, max_digits=12)),
+                ("tags", models.JSONField(blank=True, default=list)),
+                ("cover_image", models.URLField(blank=True, max_length=1000, null=True)),
+                ("screenshots", models.JSONField(blank=True, default=list)),
+                ("demo_url", models.URLField(blank=True, max_length=1000, null=True)),
+                ("tech_stack", models.JSONField(blank=True, default=list)),
+                (
+                    "license_type",
+                    models.CharField(
+                        choices=[
+                            ("mit", "MIT"),
+                            ("apache2", "Apache 2.0"),
+                            ("gpl3", "GPL 3.0"),
+                            ("proprietary", "Proprietary"),
+                            ("other", "Other"),
+                        ],
+                        default="proprietary",
+                        max_length=20,
+                    ),
+                ),
+                (
+                    "status",
+                    models.CharField(
+                        choices=[
+                            ("draft", "Draft"),
+                            ("pending_review", "Pending Review"),
+                            ("published", "Published"),
+                            ("rejected", "Rejected"),
+                            ("suspended", "Suspended"),
+                        ],
+                        default="draft",
+                        max_length=20,
+                    ),
+                ),
+                ("version", models.PositiveIntegerField(default=1)),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
+                (
+                    "category",
+                    models.ForeignKey(
+                        blank=True,
+                        null=True,
+                        on_delete=django.db.models.deletion.SET_NULL,
+                        related_name="projects",
+                        to="listings.category",
+                    ),
+                ),
+                (
+                    "seller",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="projects",
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
             ],
             options={
-                'ordering': ['-created_at'],
+                "ordering": ["-created_at"],
             },
         ),
     ]
