@@ -11,7 +11,9 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from listings.models import Project, ProjectSnapshot
+from payments.inpay import InPayClient, InPayError
 from payments.mirpay import MirPayClient
+from payments.models import PaymentProviderConfig
 
 from .models import Order
 
@@ -24,7 +26,10 @@ mirpay = MirPayClient()
 def order_create(request):
     """
     POST /api/orders/
-    Create a new order for a published project and initiate payment with MirPay.
+    Create a new order for a published project and initiate payment.
+    Accepts an optional `payment_provider` param ("inpay" or "mirpay").
+    If not specified, uses the default enabled provider from admin config,
+    falling back to MirPay for backward compatibility.
     Returns the order details and the payment redirect URL.
     """
     project_id = request.data.get("project_id")
@@ -33,7 +38,33 @@ def order_create(request):
 
     project = get_object_or_404(Project, pk=project_id, status=Project.Status.PUBLISHED)
 
-    # 1. Calculate financial splits
+    # 1. Determine which payment provider to use
+    provider_name = request.data.get("payment_provider")
+    if not provider_name:
+        # Use the default enabled provider from admin config
+        default_config = PaymentProviderConfig.objects.filter(
+            enabled=True, is_default=True
+        ).first()
+        provider_name = default_config.provider if default_config else Order.Provider.MIRPAY
+
+    # Validate provider
+    valid_providers = {Order.Provider.MIRPAY, Order.Provider.INPAY}
+    if provider_name not in valid_providers:
+        return Response(
+            {"detail": f"Unknown payment provider: {provider_name}"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Check if inPAY is enabled when requested
+    if provider_name == Order.Provider.INPAY and not PaymentProviderConfig.objects.filter(
+        provider=PaymentProviderConfig.Provider.INPAY, enabled=True
+    ).exists():
+        return Response(
+            {"detail": "inPAY is not available. Please use a different payment method."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    # 2. Calculate financial splits
     price = project.price
     # Default platform fee is 10%, but can be dynamic in future.
     # We snapshot it on the Order so history doesn't change later.
@@ -41,7 +72,7 @@ def order_create(request):
     fee_amount = (price * fee_percent / Decimal("100.00")).quantize(Decimal("1.00"))
     seller_earning = price - fee_amount
 
-    # 2. Create the Order in pending_payment status
+    # 3. Create the Order in pending_payment status
     order = Order.objects.create(
         buyer=request.user,
         project=project,
@@ -51,15 +82,22 @@ def order_create(request):
         platform_fee_amount=fee_amount,
         seller_earning_amount=seller_earning,
         status=Order.Status.PENDING_PAYMENT,
+        provider=provider_name,
     )
 
-    # 3. Initiate MirPay payment
+    # 4. Initiate payment with the selected provider
     try:
-        payid, redirect_url, raw_response = mirpay.create_payment(order)
+        if provider_name == Order.Provider.INPAY:
+            payid, redirect_url, raw_response = _create_inpay_payment(order)
+        else:
+            payid, redirect_url, raw_response = _create_mirpay_payment(order)
 
         if not payid:
             log.error(
-                "MirPay create_payment returned no payid for order %s: %s", order.id, raw_response
+                "Payment provider %s returned no payment id for order %s: %s",
+                provider_name,
+                order.id,
+                raw_response,
             )
             return Response(
                 {"detail": "Payment gateway returned malformed response. Please try again later."},
@@ -70,8 +108,9 @@ def order_create(request):
         order.save(update_fields=["payment_ref"])
 
         log.info(
-            "MirPay payment created for order %s: payid=%s, redirect_url=%s",
+            "Payment created for order %s via %s: ref=%s, redirect_url=%s",
             order.id,
+            provider_name,
             payid,
             redirect_url,
         )
@@ -81,18 +120,36 @@ def order_create(request):
                 "id": order.id,
                 "status": order.status,
                 "price": str(order.price_at_purchase),
+                "provider": provider_name,
                 "redirect_url": redirect_url or "",
                 "payid": payid,
             },
             status=status.HTTP_201_CREATED,
         )
 
-    except Exception as exc:
-        log.error("Failed to create MirPay payment for order %s: %s", order.id, exc)
+    except InPayError as exc:
+        log.error("inPAY unavailable for order %s: %s", order.id, exc)
         return Response(
-            {"detail": "Could not initiate payment with MirPay. Please try again later."},
+            {"detail": "inPAY is not available. Please try again later."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    except Exception as exc:
+        log.error("Failed to create payment for order %s via %s: %s", order.id, provider_name, exc)
+        return Response(
+            {"detail": "Could not initiate payment. Please try again later."},
             status=status.HTTP_502_BAD_GATEWAY,
         )
+
+
+def _create_mirpay_payment(order):
+    """Initiate a MirPay payment for the given order."""
+    return mirpay.create_payment(order)
+
+
+def _create_inpay_payment(order):
+    """Initiate an inPAY payment for the given order."""
+    client = InPayClient()
+    return client.create_payment(order)
 
 
 @api_view(["GET"])

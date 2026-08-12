@@ -22,6 +22,8 @@ env = environ.Env(
     FRONTEND_URL=(str, "http://localhost:8000"),
     MIRPAY_KASSA_ID=(str, ""),
     MIRPAY_API_KEY=(str, ""),
+    INPAY_MERCHANT_ID=(str, ""),
+    INPAY_MERCHANT_TOKEN=(str, ""),
     TELEGRAM_BOT_TOKEN=(str, ""),
     TELEGRAM_API_ID=(str, ""),
     TELEGRAM_API_HASH=(str, ""),
@@ -327,6 +329,11 @@ UNFOLD = {
                         "link": "/admin/orders/transaction/",
                     },
                     {
+                        "title": "Payment Settings",
+                        "icon": "settings",
+                        "link": "/admin/payments/paymentproviderconfig/",
+                    },
+                    {
                         "title": "Webhook Logs",
                         "icon": "webhook",
                         "link": "/admin/payments/webhooklog/",
@@ -437,6 +444,13 @@ CURRENT_TERMS_VERSION = "2025-07-v1"
 # MirPay.uz Payment Gateway Credentials
 MIRPAY_KASSA_ID = env("MIRPAY_KASSA_ID")
 MIRPAY_API_KEY = env("MIRPAY_API_KEY")
+
+# inPAY (inpay.uz) Payment Gateway Credentials
+# These are fallback defaults — the admin can override them via the
+# PaymentProviderConfig model in the Django admin panel. The DB config
+# takes precedence when the provider is enabled.
+INPAY_MERCHANT_ID = env("INPAY_MERCHANT_ID")
+INPAY_MERCHANT_TOKEN = env("INPAY_MERCHANT_TOKEN")
 
 # Redis cache backend (shared Redis instance).
 # OPTIONS: use short socket timeouts so a dropped Upstash idle connection

@@ -13,6 +13,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from listings.models import Category, Project, ProjectSnapshot
+from payments.models import PaymentProviderConfig
 
 from .models import Order, Transaction
 
@@ -313,3 +314,126 @@ class TransactionModelTest(TestCase):
 
     def test_transaction_type_choices(self):
         self.assertEqual(len(Transaction.Type.choices), 4)
+
+
+# ── order create with inPAY ─────────────────────────────────────────────────
+
+
+# Valid Fernet key: 32 url-safe base64-encoded bytes (44 chars total)
+VALID_FERNET_KEY = "tNRYfzfLIs70GgPOWiVo7DNEmos3RflMhk4OZ0pROTQ="
+
+
+@override_settings(
+    FERNET_KEY=VALID_FERNET_KEY,
+    MIRPAY_KASSA_ID="test_kassa",
+    MIRPAY_API_KEY="test_key",
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+)
+class OrderCreateInPayTest(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.buyer = _buyer(username="inpay_ord_buyer", email="iob@test.com")
+        self.seller = _seller(username="inpay_ord_seller", email="ios@test.com")
+        self.project = Project.objects.create(
+            title="inPAY Sale",
+            slug="inpay-sale",
+            description="d",
+            price=Decimal("50000.00"),
+            status=Project.Status.PUBLISHED,
+            seller=self.seller,
+            category=_category(),
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=_bearer(self.buyer))
+        self.url = reverse("order_create")
+        self.inpay_config = PaymentProviderConfig.objects.create(
+            provider=PaymentProviderConfig.Provider.INPAY,
+            enabled=True,
+            is_default=True,
+            merchant_id="1353",
+            merchant_token_encrypted="encrypted",
+        )
+
+    @patch("orders.views._create_inpay_payment")
+    def test_create_order_inpay_success(self, mock_create_inpay):
+        mock_create_inpay.return_value = (
+            "1ff2f5a6d66f6e9c",
+            "https://inpay.uz/checkout/1ff2f5a6d66f6e9c",
+            {"success": True, "order_id": "1ff2f5a6d66f6e9c"},
+        )
+        resp = self.client.post(
+            self.url,
+            {"project_id": self.project.id, "payment_provider": "inpay"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        data = resp.json()
+        self.assertEqual(data["provider"], "inpay")
+        self.assertEqual(data["redirect_url"], "https://inpay.uz/checkout/1ff2f5a6d66f6e9c")
+        order = Order.objects.filter(buyer=self.buyer).latest("id")
+        self.assertEqual(order.provider, "inpay")
+        self.assertEqual(order.payment_ref, "1ff2f5a6d66f6e9c")
+
+    @patch("orders.views._create_inpay_payment")
+    def test_create_order_inpay_uses_default_provider(self, mock_create_inpay):
+        """When no payment_provider is specified, uses the default from admin config."""
+        mock_create_inpay.return_value = (
+            "abc123",
+            "https://inpay.uz/checkout/abc123",
+            {"success": True, "order_id": "abc123"},
+        )
+        resp = self.client.post(
+            self.url,
+            {"project_id": self.project.id},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        data = resp.json()
+        self.assertEqual(data["provider"], "inpay")
+        mock_create_inpay.assert_called_once()
+
+    def test_create_order_inpay_disabled_returns_503(self):
+        self.inpay_config.enabled = False
+        self.inpay_config.save()
+        resp = self.client.post(
+            self.url,
+            {"project_id": self.project.id, "payment_provider": "inpay"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 503)
+
+    def test_create_order_unknown_provider_returns_400(self):
+        resp = self.client.post(
+            self.url,
+            {"project_id": self.project.id, "payment_provider": "unknown"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    @patch("orders.views._create_mirpay_payment")
+    def test_create_order_mirpay_still_works(self, mock_create_mirpay):
+        """Explicitly requesting MirPay still works."""
+        mock_create_mirpay.return_value = (
+            "MP001",
+            "https://mirpay.uz/pay/123",
+            {"payid": "MP001"},
+        )
+        resp = self.client.post(
+            self.url,
+            {"project_id": self.project.id, "payment_provider": "mirpay"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        data = resp.json()
+        self.assertEqual(data["provider"], "mirpay")
+
+    @patch("orders.views._create_inpay_payment")
+    def test_create_order_inpay_failure_returns_503(self, mock_create_inpay):
+        from payments.inpay import InPayError
+
+        mock_create_inpay.side_effect = InPayError("inPAY is not configured or disabled")
+        resp = self.client.post(
+            self.url,
+            {"project_id": self.project.id, "payment_provider": "inpay"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 503)

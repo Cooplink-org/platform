@@ -14,7 +14,8 @@ from rest_framework.views import APIView
 from listings.models import Project
 from orders.models import Order, Transaction
 
-from .models import WebhookLog
+from .inpay import InPayError
+from .models import PaymentProviderConfig, WebhookLog
 
 User = get_user_model()
 
@@ -217,3 +218,372 @@ class MirPayWebhookTest(TestCase):
         self.assertIsNotNone(fee_tx)
         self.assertEqual(earning_tx.amount, Decimal("90000.00"))
         self.assertEqual(fee_tx.amount, Decimal("10000.00"))
+
+
+# ── PaymentProviderConfig model ──────────────────────────────────────────────
+
+
+# Valid Fernet key: 32 url-safe base64-encoded bytes (44 chars total)
+VALID_FERNET_KEY = "tNRYfzfLIs70GgPOWiVo7DNEmos3RflMhk4OZ0pROTQ="
+
+
+@override_settings(
+    FERNET_KEY=VALID_FERNET_KEY,
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+)
+class PaymentProviderConfigTest(TestCase):
+    def test_create_config(self):
+        config = PaymentProviderConfig.objects.create(
+            provider=PaymentProviderConfig.Provider.INPAY,
+            enabled=True,
+            merchant_id="1353",
+            merchant_token_encrypted="encrypted_value",
+        )
+        self.assertEqual(str(config), "inPAY (enabled)")
+        self.assertTrue(config.enabled)
+
+    def test_disabled_config_str(self):
+        config = PaymentProviderConfig.objects.create(
+            provider=PaymentProviderConfig.Provider.INPAY,
+            enabled=False,
+        )
+        self.assertEqual(str(config), "inPAY (disabled)")
+
+    def test_only_one_default_at_a_time(self):
+        c1 = PaymentProviderConfig.objects.create(
+            provider=PaymentProviderConfig.Provider.INPAY,
+            enabled=True,
+            is_default=True,
+        )
+        c2 = PaymentProviderConfig.objects.create(
+            provider=PaymentProviderConfig.Provider.MIRPAY,
+            enabled=True,
+            is_default=True,
+        )
+        c1.refresh_from_db()
+        self.assertFalse(c1.is_default)
+        self.assertTrue(c2.is_default)
+
+    def test_disabled_cannot_be_default(self):
+        config = PaymentProviderConfig.objects.create(
+            provider=PaymentProviderConfig.Provider.INPAY,
+            enabled=False,
+            is_default=True,
+        )
+        config.refresh_from_db()
+        self.assertFalse(config.is_default)
+
+    def test_merchant_token_property_decrypts(self):
+        from accounts.utils import encrypt_token
+
+        plaintext = "6a7bf375b302cfcda6692e6f60402cb3"
+        config = PaymentProviderConfig.objects.create(
+            provider=PaymentProviderConfig.Provider.INPAY,
+            enabled=True,
+            merchant_token_encrypted=encrypt_token(plaintext),
+        )
+        self.assertEqual(config.merchant_token, plaintext)
+
+    def test_merchant_token_empty_when_not_set(self):
+        config = PaymentProviderConfig.objects.create(
+            provider=PaymentProviderConfig.Provider.INPAY,
+            enabled=True,
+        )
+        self.assertEqual(config.merchant_token, "")
+
+
+# ── inPAY webhook ────────────────────────────────────────────────────────────
+
+
+@override_settings(
+    FERNET_KEY=VALID_FERNET_KEY,
+    MIRPAY_KASSA_ID="test_kassa",
+    MIRPAY_API_KEY="test_key",
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+)
+class InPayWebhookTest(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.buyer = User.objects.create_user(username="inpay_buyer", password="pass")
+        self.seller = User.objects.create_user(
+            username="inpay_seller", password="pass", is_seller=True
+        )
+        self.project = Project.objects.create(
+            title="inPAY Test",
+            slug="inpay-test",
+            description="Test",
+            price=Decimal("15000.00"),
+            status=Project.Status.PUBLISHED,
+            seller=self.seller,
+        )
+        self.order = Order.objects.create(
+            buyer=self.buyer,
+            project=self.project,
+            seller=self.seller,
+            price_at_purchase=Decimal("15000.00"),
+            platform_fee_percent=Decimal("10.00"),
+            platform_fee_amount=Decimal("1500.00"),
+            seller_earning_amount=Decimal("13500.00"),
+            status=Order.Status.PENDING_PAYMENT,
+            payment_ref="1ff2f5a6d66f6e9c",
+            provider=Order.Provider.INPAY,
+        )
+        self.inpay_config = PaymentProviderConfig.objects.create(
+            provider=PaymentProviderConfig.Provider.INPAY,
+            enabled=True,
+            merchant_id="1353",
+            merchant_token_encrypted="encrypted",
+        )
+
+    def _webhook_body(self, overrides=None):
+        data = {
+            "amount": "15000.00",
+            "status": "success",
+            "order_id": "1ff2f5a6d66f6e9c",
+            "transaction_id": 149,
+            "created_at": "2025-12-10 05:14:52",
+        }
+        if overrides:
+            data.update(overrides)
+        return data
+
+    @patch("payments.views.InPayClient")
+    def test_success_webhook_marks_order_paid(self, mock_inpay_client):
+        mock_client = mock_inpay_client.return_value
+        mock_client.check_status.return_value = {
+            "success": True,
+            "order_id": "1ff2f5a6d66f6e9c",
+            "status": "success",
+            "amount": 15000,
+            "payment_method": "click",
+        }
+        resp = self.client.post(
+            reverse("inpay_webhook"),
+            data=self._webhook_body(),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.content, b"OK")
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.Status.PAID)
+        self.assertIsNotNone(self.order.paid_at)
+        self.assertTrue(
+            Transaction.objects.filter(
+                order=self.order, type=Transaction.Type.SALE_EARNING
+            ).exists()
+        )
+        self.assertTrue(
+            WebhookLog.objects.filter(
+                matched_order=self.order, endpoint="inpay"
+            ).exists()
+        )
+
+    @patch("payments.views.InPayClient")
+    def test_webhook_idempotent_on_paid_order(self, mock_inpay_client):
+        self.order.status = Order.Status.PAID
+        self.order.save(update_fields=["status"])
+        resp = self.client.post(
+            reverse("inpay_webhook"),
+            data=self._webhook_body(),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        # InPayClient should not have been called (order already processed)
+        mock_inpay_client.assert_not_called()
+
+    @patch("payments.views.InPayClient")
+    def test_webhook_verification_pending_keeps_order_pending(self, mock_inpay_client):
+        mock_client = mock_inpay_client.return_value
+        mock_client.check_status.return_value = {
+            "success": True,
+            "order_id": "1ff2f5a6d66f6e9c",
+            "status": "pending",
+            "amount": 15000,
+        }
+        resp = self.client.post(
+            reverse("inpay_webhook"),
+            data=self._webhook_body(),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.Status.PENDING_PAYMENT)
+
+    @patch("payments.views.InPayClient")
+    def test_webhook_failed_status_marks_order_failed(self, mock_inpay_client):
+        mock_client = mock_inpay_client.return_value
+        mock_client.check_status.return_value = {
+            "success": True,
+            "order_id": "1ff2f5a6d66f6e9c",
+            "status": "failed",
+            "amount": 15000,
+        }
+        resp = self.client.post(
+            reverse("inpay_webhook"),
+            data=self._webhook_body({"status": "failed"}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.Status.FAILED)
+
+    def test_webhook_missing_order_id(self):
+        resp = self.client.post(
+            reverse("inpay_webhook"),
+            data={"amount": "15000", "status": "success"},
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+
+    def test_webhook_no_matching_order(self):
+        resp = self.client.post(
+            reverse("inpay_webhook"),
+            data=self._webhook_body({"order_id": "nonexistent_id"}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+
+    def test_webhook_invalid_json(self):
+        resp = self.client.post(
+            reverse("inpay_webhook"),
+            data="not json",
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+
+    @patch("payments.views.InPayClient")
+    def test_webhook_verification_failure_returns_502(self, mock_inpay_client):
+        mock_client = mock_inpay_client.return_value
+        mock_client.check_status.side_effect = Exception("Connection refused")
+        resp = self.client.post(
+            reverse("inpay_webhook"),
+            data=self._webhook_body(),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 502)
+
+    @patch("payments.views.InPayClient")
+    def test_webhook_creates_both_transactions(self, mock_inpay_client):
+        mock_client = mock_inpay_client.return_value
+        mock_client.check_status.return_value = {
+            "success": True,
+            "order_id": "1ff2f5a6d66f6e9c",
+            "status": "success",
+            "amount": 15000,
+        }
+        self.client.post(
+            reverse("inpay_webhook"),
+            data=self._webhook_body(),
+            content_type="application/json",
+        )
+        earning_tx = Transaction.objects.filter(
+            order=self.order, type=Transaction.Type.SALE_EARNING
+        ).first()
+        fee_tx = Transaction.objects.filter(
+            order=self.order, type=Transaction.Type.PLATFORM_FEE
+        ).first()
+        self.assertIsNotNone(earning_tx)
+        self.assertIsNotNone(fee_tx)
+        self.assertEqual(earning_tx.amount, Decimal("13500.00"))
+        self.assertEqual(fee_tx.amount, Decimal("1500.00"))
+
+
+# ── inPAY verify endpoint ────────────────────────────────────────────────────
+
+
+@override_settings(
+    FERNET_KEY=VALID_FERNET_KEY,
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+)
+class InPayVerifyTest(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.buyer = User.objects.create_user(username="inpay_v_buyer", password="pass")
+        self.seller = User.objects.create_user(
+            username="inpay_v_seller", password="pass", is_seller=True
+        )
+        self.project = Project.objects.create(
+            title="inPAY Verify",
+            slug="inpay-verify",
+            description="Test",
+            price=Decimal("15000.00"),
+            status=Project.Status.PUBLISHED,
+            seller=self.seller,
+        )
+        self.order = Order.objects.create(
+            buyer=self.buyer,
+            project=self.project,
+            seller=self.seller,
+            price_at_purchase=Decimal("15000.00"),
+            platform_fee_percent=Decimal("10.00"),
+            platform_fee_amount=Decimal("1500.00"),
+            seller_earning_amount=Decimal("13500.00"),
+            status=Order.Status.PENDING_PAYMENT,
+            payment_ref="1ff2f5a6d66f6e9c",
+            provider=Order.Provider.INPAY,
+        )
+        self.inpay_config = PaymentProviderConfig.objects.create(
+            provider=PaymentProviderConfig.Provider.INPAY,
+            enabled=True,
+            merchant_id="1353",
+            merchant_token_encrypted="encrypted",
+        )
+        self.client.force_authenticate(self.buyer)
+
+    @patch("payments.views.InPayClient")
+    def test_verify_marks_paid(self, mock_inpay_client):
+        mock_client = mock_inpay_client.return_value
+        mock_client.check_status.return_value = {
+            "success": True,
+            "order_id": "1ff2f5a6d66f6e9c",
+            "status": "success",
+            "amount": 15000,
+        }
+        resp = self.client.post(
+            reverse("inpay_verify_payment"),
+            data={"order_id": "1ff2f5a6d66f6e9c"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["status"], "paid")
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.Status.PAID)
+
+    def test_verify_missing_order_id(self):
+        resp = self.client.post(
+            reverse("inpay_verify_payment"),
+            data={},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    @patch("payments.views.InPayClient")
+    def test_verify_inpay_not_configured(self, mock_inpay_client):
+        mock_inpay_client.side_effect = InPayError("inPAY is not configured or disabled")
+        self.inpay_config.enabled = False
+        self.inpay_config.save()
+        resp = self.client.post(
+            reverse("inpay_verify_payment"),
+            data={"order_id": "1ff2f5a6d66f6e9c"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 503)
+
+    @patch("payments.views.InPayClient")
+    def test_verify_already_paid(self, mock_inpay_client):
+        self.order.status = Order.Status.PAID
+        self.order.save(update_fields=["status"])
+        mock_client = mock_inpay_client.return_value
+        mock_client.check_status.return_value = {
+            "success": True,
+            "order_id": "1ff2f5a6d66f6e9c",
+            "status": "success",
+            "amount": 15000,
+        }
+        resp = self.client.post(
+            reverse("inpay_verify_payment"),
+            data={"order_id": "1ff2f5a6d66f6e9c"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["status"], "paid")

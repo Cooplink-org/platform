@@ -2,7 +2,7 @@ import json
 import logging
 
 from django.db import transaction as db_transaction
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
@@ -12,6 +12,7 @@ from rest_framework.response import Response
 
 from orders.models import Order, Transaction
 
+from .inpay import InPayClient, InPayError
 from .mirpay import MirPayClient, is_failed_status, is_success_status
 from .models import WebhookLog
 
@@ -258,6 +259,163 @@ def mirpay_verify_payment(request):
         return Response({"status": "paid", "order_id": order.id})
 
     # Don't mark as failed — just report the current state
+    if order:
+        return Response({"status": order.status, "order_id": order.id})
+
+    return Response({"status": "unknown", "detail": "Order not found or status unclear"})
+
+
+# ── inPAY ────────────────────────────────────────────────────────────────────
+
+
+@csrf_exempt
+@require_POST
+def inpay_webhook(request):
+    """POST /api/payments/inpay/webhook/ — inPAY payment notification.
+
+    inPAY sends a JSON payload with {amount, status, order_id, transaction_id,
+    created_at}. We match the order via payment_ref (inPAY order_id) and
+    independently verify the status before confirming.
+    """
+    raw_body = request.body.decode("utf-8", errors="replace")
+
+    try:
+        data = json.loads(raw_body)
+    except json.JSONDecodeError:
+        log.warning("inPAY webhook — invalid JSON: %s", raw_body[:500])
+        return HttpResponse("OK", status=200)
+
+    log.info("inPAY webhook raw: %s", raw_body)
+
+    wh_log = WebhookLog.objects.create(endpoint="inpay", raw_body=raw_body)
+
+    order_id = data.get("order_id")
+    if not order_id:
+        log.warning("inPAY webhook missing order_id — %s", raw_body)
+        wh_log.verification_response = {"error": "missing order_id"}
+        wh_log.save(update_fields=["verification_response"])
+        return HttpResponse("OK", status=200)
+
+    # Match order via payment_ref (inPAY order_id stored at creation time)
+    order = Order.objects.filter(payment_ref=order_id, provider=Order.Provider.INPAY).first()
+
+    if not order:
+        log.warning("inPAY webhook — no matching order for order_id=%s", order_id)
+        wh_log.verification_response = data
+        wh_log.save(update_fields=["verification_response"])
+        return HttpResponse("OK", status=200)
+
+    wh_log.matched_order = order
+    wh_log.verification_response = data
+    wh_log.save(update_fields=["matched_order", "verification_response"])
+
+    # Idempotency: ignore if not pending_payment
+    if order.status != Order.Status.PENDING_PAYMENT:
+        log.info(
+            "Order %s status is %s — ignoring inPAY webhook",
+            order.id,
+            order.status,
+        )
+        return HttpResponse("OK", status=200)
+
+    # Independently verify with inPAY (never trust the webhook alone)
+    try:
+        client = InPayClient()
+        verification = client.check_status(order_id)
+    except Exception as exc:
+        log.error("inPAY check_status failed for order_id=%s: %s", order_id, exc)
+        wh_log.verification_response = {"error": str(exc), "webhook": data}
+        wh_log.save(update_fields=["verification_response"])
+        # Return non-200 so inPAY retries the webhook
+        return HttpResponse("verification failed", status=502)
+
+    wh_log.verification_response = verification
+    wh_log.save(update_fields=["verification_response"])
+
+    verified_status = str(verification.get("status", "")).strip().lower()
+
+    # Verify amount matches
+    verified_amount = verification.get("amount")
+    if verified_amount:
+        try:
+            if float(verified_amount) != float(order.price_at_purchase):
+                log.warning(
+                    "Amount mismatch for order %s: inPAY amount=%s, expected=%s",
+                    order.id,
+                    verified_amount,
+                    order.price_at_purchase,
+                )
+        except (ValueError, TypeError):
+            log.error("Could not parse verified amount: %s", verified_amount)
+
+    if verified_status == "success":
+        _confirm_payment(order)
+        log.info("Order %s marked paid via inPAY webhook", order.id)
+        return HttpResponse("OK", status=200)
+
+    if verified_status in ("failed", "cancelled"):
+        order.status = Order.Status.FAILED
+        order.save(update_fields=["status"])
+        log.warning(
+            "Order %s marked failed via inPAY webhook (status=%s)",
+            order.id,
+            verified_status,
+        )
+        return HttpResponse("OK", status=200)
+
+    # Status is "pending" or unclear — keep the order pending
+    log.warning(
+        "inPAY webhook for order %s but verification status is '%s' — keeping pending",
+        order.id,
+        verified_status,
+    )
+    return HttpResponse("OK", status=200)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def inpay_verify_payment(request):
+    """POST /api/payments/inpay/verify/
+
+    Called from the frontend after the customer returns from inPAY checkout.
+    Independently verifies payment status with inPAY and confirms the order.
+    """
+    order_id = request.data.get("order_id")
+    if not order_id:
+        return Response({"error": "order_id is required"}, status=400)
+
+    try:
+        client = InPayClient()
+        verification = client.check_status(order_id)
+    except InPayError as exc:
+        return Response({"error": str(exc)}, status=503)
+    except Exception as exc:
+        log.error("inPAY check_status failed for order_id=%s: %s", order_id, exc)
+        return Response({"error": str(exc)}, status=502)
+
+    log.info(
+        "inpay_verify order_id=%s verification=%s",
+        order_id,
+        json.dumps(verification, ensure_ascii=False),
+    )
+
+    verified_status = str(verification.get("status", "")).strip().lower()
+    order = Order.objects.filter(payment_ref=order_id, provider=Order.Provider.INPAY).first()
+
+    if order and order.status == Order.Status.PAID:
+        return Response({"status": "paid", "order_id": order.id})
+
+    if order and verified_status == "success":
+        if order.status in (Order.Status.PENDING_PAYMENT, Order.Status.FAILED):
+            _confirm_payment(order)
+            log.info(
+                "Order %s marked paid via inPAY verify endpoint (was %s)",
+                order.id,
+                order.status,
+            )
+            return Response({"status": "paid", "order_id": order.id})
+        return Response({"status": "paid", "order_id": order.id})
+
     if order:
         return Response({"status": order.status, "order_id": order.id})
 

@@ -50,11 +50,12 @@ class OrderAdmin(ModelAdmin):
         "project",
         "seller",
         "status",
+        "provider",
         "price_at_purchase",
         "downloaded_at",
         "created_at",
     )
-    list_filter = ("status", "created_at")
+    list_filter = ("status", "provider", "created_at")
     search_fields = (
         "buyer__username",
         "seller__username",

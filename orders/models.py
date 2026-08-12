@@ -26,6 +26,14 @@ class Order(models.Model):
     seller_earning_amount = models.DecimalField(max_digits=12, decimal_places=2)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING_PAYMENT)
     payment_ref = models.CharField(max_length=255, null=True, blank=True)
+
+    class Provider(models.TextChoices):
+        MIRPAY = "mirpay", "MirPay"
+        INPAY = "inpay", "inPAY"
+
+    provider = models.CharField(
+        max_length=20, choices=Provider.choices, default=Provider.MIRPAY
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     paid_at = models.DateTimeField(null=True, blank=True)
     downloaded_at = models.DateTimeField(null=True, blank=True)
