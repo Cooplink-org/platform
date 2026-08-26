@@ -1,3 +1,4 @@
+import itertools
 from datetime import timedelta
 
 from django.conf import settings
@@ -20,6 +21,8 @@ User = get_user_model()
 APIView.throttle_classes = []
 SimpleRateThrottle.THROTTLE_RATES = {"anon": None, "user": None, "burst": None}
 
+_phone_seq = itertools.count(1)
+
 
 def _bearer(user):
     return f"Bearer {RefreshToken.for_user(user).access_token}"
@@ -27,7 +30,10 @@ def _bearer(user):
 
 def _onboard(user):
     user.full_legal_name = "Test User"
-    user.phone_number = "+998901234567"
+    # Verified phones are unique across users (unique_verified_phone constraint),
+    # so derive a distinct number for every onboarded user.
+    user.phone_number = f"+99890{next(_phone_seq):08d}"
+    user.phone_verified = True
     user.avatar_url = "https://avatars.githubusercontent.com/u/1"
     user.terms_accepted_version = settings.CURRENT_TERMS_VERSION
     user.terms_accepted_at = timezone.now()
@@ -35,6 +41,7 @@ def _onboard(user):
         update_fields=[
             "full_legal_name",
             "phone_number",
+            "phone_verified",
             "avatar_url",
             "terms_accepted_version",
             "terms_accepted_at",
@@ -519,10 +526,18 @@ class RatingTest(TestCase):
         self.assertEqual(data["score"], 5)
         self.assertEqual(data["username"], "r_buyer")
 
-    def test_non_buyer_cannot_rate(self):
+    def test_unverified_user_cannot_rate(self):
+        self.other.phone_verified = False
+        self.other.save(update_fields=["phone_verified"])
         self._auth(self.other)
         resp = self.client.post(self.url, {"score": 4}, format="json")
         self.assertEqual(resp.status_code, 403)
+
+    def test_verified_non_buyer_can_rate(self):
+        # Ratings require a verified phone number, not a prior purchase.
+        self._auth(self.other)
+        resp = self.client.post(self.url, {"score": 4}, format="json")
+        self.assertEqual(resp.status_code, 201)
 
     def test_seller_cannot_rate_own_project(self):
         self._auth(self.seller)

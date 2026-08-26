@@ -13,7 +13,6 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from accounts.utils import decrypt_token
-from orders.models import Order
 
 from .models import Category, Comment, Project, ProjectQA, Rating
 from .serializers import (
@@ -473,14 +472,10 @@ def rating_upsert(request, slug):
     if request.method in ("POST", "PATCH", "DELETE"):
         if not request.user.is_authenticated:
             return Response(status=status.HTTP_401_UNAUTHORIZED)
-        # Verify buyer status — must have a paid order for this project
-        if not Order.objects.filter(
-            buyer=request.user,
-            project=project,
-            status=Order.Status.PAID,
-        ).exists():
+        # Verify user — must have a verified phone number
+        if not request.user.phone_verified:
             return Response(
-                {"detail": "Only verified buyers can rate or review this project."},
+                {"detail": "Only verified users can rate or review this project."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
