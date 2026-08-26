@@ -31,9 +31,7 @@ class Order(models.Model):
         MIRPAY = "mirpay", "MirPay"
         INPAY = "inpay", "inPAY"
 
-    provider = models.CharField(
-        max_length=20, choices=Provider.choices, default=Provider.MIRPAY
-    )
+    provider = models.CharField(max_length=20, choices=Provider.choices, default=Provider.MIRPAY)
     created_at = models.DateTimeField(auto_now_add=True)
     paid_at = models.DateTimeField(null=True, blank=True)
     downloaded_at = models.DateTimeField(null=True, blank=True)

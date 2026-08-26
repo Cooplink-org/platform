@@ -1,6 +1,7 @@
 import logging
 from decimal import Decimal
 
+from django.conf import settings
 from django.db.models import F
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
@@ -12,7 +13,7 @@ from rest_framework.response import Response
 
 from listings.models import Project, ProjectSnapshot
 from payments.inpay import InPayClient, InPayError
-from payments.mirpay import MirPayClient
+from payments.mirpay import MirPayClient, MirPayError
 from payments.models import PaymentProviderConfig
 
 from .models import Order
@@ -42,9 +43,7 @@ def order_create(request):
     provider_name = request.data.get("payment_provider")
     if not provider_name:
         # Use the default enabled provider from admin config
-        default_config = PaymentProviderConfig.objects.filter(
-            enabled=True, is_default=True
-        ).first()
+        default_config = PaymentProviderConfig.objects.filter(enabled=True, is_default=True).first()
         provider_name = default_config.provider if default_config else Order.Provider.MIRPAY
 
     # Validate provider
@@ -55,12 +54,22 @@ def order_create(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    # Check if inPAY is enabled when requested
-    if provider_name == Order.Provider.INPAY and not PaymentProviderConfig.objects.filter(
-        provider=PaymentProviderConfig.Provider.INPAY, enabled=True
-    ).exists():
+    # Check the chosen provider is enabled in admin config or configured via settings
+    has_db_config = PaymentProviderConfig.objects.filter(
+        provider=provider_name, enabled=True
+    ).exists()
+    has_env_config = provider_name == Order.Provider.MIRPAY and bool(
+        getattr(settings, "MIRPAY_KASSA_ID", "")
+    )
+
+    if not (has_db_config or has_env_config):
         return Response(
-            {"detail": "inPAY is not available. Please use a different payment method."},
+            {
+                "detail": (
+                    f"{'inPAY' if provider_name == Order.Provider.INPAY else 'MirPay'} "
+                    "is not available. Please use a different payment method."
+                )
+            },
             status=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
 
@@ -88,7 +97,8 @@ def order_create(request):
     # 4. Initiate payment with the selected provider
     try:
         if provider_name == Order.Provider.INPAY:
-            payid, redirect_url, raw_response = _create_inpay_payment(order)
+            client_ip = _extract_client_ip(request)
+            payid, redirect_url, raw_response = _create_inpay_payment(order, client_ip=client_ip)
         else:
             payid, redirect_url, raw_response = _create_mirpay_payment(order)
 
@@ -130,15 +140,35 @@ def order_create(request):
     except InPayError as exc:
         log.error("inPAY unavailable for order %s: %s", order.id, exc)
         return Response(
-            {"detail": "inPAY is not available. Please try again later."},
+            {
+                "detail": (
+                    "inPAY is not available. Please whitelist your server IP "
+                    "in the inPAY dashboard (Strict mode) or choose MirPay. "
+                    f"Error: {exc}"
+                )
+            },
             status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    except MirPayError as exc:
+        log.error("MirPay error for order %s: %s", order.id, exc)
+        return Response(
+            {"detail": f"MirPay payment error: {exc}"},
+            status=status.HTTP_502_BAD_GATEWAY,
         )
     except Exception as exc:
         log.error("Failed to create payment for order %s via %s: %s", order.id, provider_name, exc)
         return Response(
-            {"detail": "Could not initiate payment. Please try again later."},
+            {"detail": f"Could not initiate payment via {provider_name}: {exc}"},
             status=status.HTTP_502_BAD_GATEWAY,
         )
+
+
+def _extract_client_ip(request) -> str:
+    """Best-effort extraction of the real client IP (X-Forwarded-For first)."""
+    forwarded = request.META.get("HTTP_X_FORWARDED_FOR", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.META.get("REMOTE_ADDR", "")
 
 
 def _create_mirpay_payment(order):
@@ -146,10 +176,10 @@ def _create_mirpay_payment(order):
     return mirpay.create_payment(order)
 
 
-def _create_inpay_payment(order):
+def _create_inpay_payment(order, client_ip: str = ""):
     """Initiate an inPAY payment for the given order."""
     client = InPayClient()
-    return client.create_payment(order)
+    return client.create_payment(order, client_ip=client_ip)
 
 
 @api_view(["GET"])
@@ -223,8 +253,7 @@ def order_download(request, pk):
         return Response(
             {
                 "detail": (
-                    f"Order is {order.get_status_display()}. "
-                    "Only paid orders can be downloaded."
+                    f"Order is {order.get_status_display()}. Only paid orders can be downloaded."
                 )
             },
             status=400,

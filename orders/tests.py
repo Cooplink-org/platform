@@ -140,6 +140,13 @@ class OrderCreateTest(TestCase):
         )
         self.client.credentials(HTTP_AUTHORIZATION=_bearer(self.buyer))
         self.url = reverse("order_create")
+        PaymentProviderConfig.objects.create(
+            provider=PaymentProviderConfig.Provider.MIRPAY,
+            enabled=True,
+            is_default=True,
+            merchant_id="1430",
+            merchant_token_encrypted="encrypted",
+        )
 
     @patch("payments.mirpay.MirPayClient.create_payment")
     @patch("payments.mirpay.MirPayClient.get_token")
@@ -352,6 +359,13 @@ class OrderCreateInPayTest(TestCase):
             merchant_id="1353",
             merchant_token_encrypted="encrypted",
         )
+        self.mirpay_config = PaymentProviderConfig.objects.create(
+            provider=PaymentProviderConfig.Provider.MIRPAY,
+            enabled=True,
+            is_default=False,
+            merchant_id="1430",
+            merchant_token_encrypted="encrypted",
+        )
 
     @patch("orders.views._create_inpay_payment")
     def test_create_order_inpay_success(self, mock_create_inpay):
@@ -426,14 +440,27 @@ class OrderCreateInPayTest(TestCase):
         data = resp.json()
         self.assertEqual(data["provider"], "mirpay")
 
+    @patch("orders.views._create_mirpay_payment")
     @patch("orders.views._create_inpay_payment")
-    def test_create_order_inpay_failure_returns_503(self, mock_create_inpay):
+    def test_create_order_inpay_failure_no_fallback(self, mock_create_inpay, mock_create_mirpay):
         from payments.inpay import InPayError
 
-        mock_create_inpay.side_effect = InPayError("inPAY is not configured or disabled")
+        mock_create_inpay.side_effect = InPayError("inPAY Strict mode IP rejection")
         resp = self.client.post(
             self.url,
             {"project_id": self.project.id, "payment_provider": "inpay"},
             format="json",
         )
+        self.assertEqual(resp.status_code, 503)
+        mock_create_mirpay.assert_not_called()
+
+    def test_create_order_inpay_failure_returns_503(self):
+        from payments.inpay import InPayError
+
+        with patch("orders.views._create_inpay_payment", side_effect=InPayError("inPAY down")):
+            resp = self.client.post(
+                self.url,
+                {"project_id": self.project.id, "payment_provider": "inpay"},
+                format="json",
+            )
         self.assertEqual(resp.status_code, 503)
