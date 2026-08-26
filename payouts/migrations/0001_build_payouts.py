@@ -27,8 +27,7 @@ class Migration(migrations.Migration):
                     "destination_card_encrypted",
                     models.TextField(
                         help_text=(
-                            "Fernet-encrypted card number. "
-                            "Decrypted only on the admin detail page."
+                            "Fernet-encrypted card number. Decrypted only on the admin detail page."
                         )
                     ),
                 ),

@@ -8,17 +8,42 @@ from unfold.admin import ModelAdmin
 from accounts.utils import decrypt_token
 from orders.models import Transaction
 
-from .models import PayoutRequest
+from .models import PayoutFeeConfig, PayoutRequest
+
+
+@admin.register(PayoutFeeConfig)
+class PayoutFeeConfigAdmin(ModelAdmin):
+    """Admin page to edit the withdrawal fee percentage (singleton)."""
+
+    list_display = ("fee_percent", "updated_at")
+
+    def has_add_permission(self, _request):
+        # Singleton — no need to create duplicates.
+        return not PayoutFeeConfig.objects.exists()
+
+    def has_delete_permission(self, _request, _obj=None):
+        return False
 
 
 @admin.register(PayoutRequest)
 class PayoutRequestAdmin(ModelAdmin):
-    list_display = ("seller", "amount", "destination_card_last4", "status", "requested_at")
+    list_display = (
+        "seller",
+        "amount",
+        "payout_fee_amount",
+        "net_amount",
+        "destination_card_last4",
+        "status",
+        "requested_at",
+    )
     list_filter = ("status",)
     search_fields = ("seller__username", "destination_card_last4")
     readonly_fields = (
         "seller",
         "amount",
+        "payout_fee_percent",
+        "payout_fee_amount",
+        "net_amount",
         "destination_card_last4",
         "requested_at",
         "processed_at",
@@ -30,7 +55,15 @@ class PayoutRequestAdmin(ModelAdmin):
         (
             None,
             {
-                "fields": ("seller", "amount", "status", "admin_note"),
+                "fields": (
+                    "seller",
+                    "amount",
+                    "payout_fee_percent",
+                    "payout_fee_amount",
+                    "net_amount",
+                    "status",
+                    "admin_note",
+                ),
             },
         ),
         (
@@ -182,8 +215,7 @@ class PayoutRequestAdmin(ModelAdmin):
             {
                 "title": "Reject payout",
                 "message": (
-                    "Reject the selected payout requests. "
-                    "Provide a reason visible to the seller."
+                    "Reject the selected payout requests. Provide a reason visible to the seller."
                 ),
                 "action_name": "reject_payout",
                 "queryset": qs,
