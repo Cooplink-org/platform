@@ -14,19 +14,52 @@ from .models import AICodeReview
 logger = logging.getLogger("moderation.ai_reviewer")
 
 TEXT_EXTENSIONS = {
-    ".py", ".js", ".ts", ".jsx", ".tsx", ".html", ".css", ".json", ".sql",
-    ".sh", ".go", ".rs", ".php", ".cpp", ".c", ".h", ".java", ".kt", ".dart",
-    ".md", ".yml", ".yaml", ".toml", ".env.example", ".vue", ".svelte"
+    ".py",
+    ".js",
+    ".ts",
+    ".jsx",
+    ".tsx",
+    ".html",
+    ".css",
+    ".json",
+    ".sql",
+    ".sh",
+    ".go",
+    ".rs",
+    ".php",
+    ".cpp",
+    ".c",
+    ".h",
+    ".java",
+    ".kt",
+    ".dart",
+    ".md",
+    ".yml",
+    ".yaml",
+    ".toml",
+    ".env.example",
+    ".vue",
+    ".svelte",
 }
 
 IGNORED_DIRS = {
-    "node_modules", "venv", ".venv", "env", ".env", "__pycache__", ".git",
-    ".idea", ".vscode", "dist", "build", ".next", "target", "vendor"
+    "node_modules",
+    "venv",
+    ".venv",
+    "env",
+    ".env",
+    "__pycache__",
+    ".git",
+    ".idea",
+    ".vscode",
+    "dist",
+    "build",
+    ".next",
+    "target",
+    "vendor",
 }
 
-IGNORED_FILES = {
-    "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "uv.lock", "poetry.lock"
-}
+IGNORED_FILES = {"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "uv.lock", "poetry.lock"}
 
 
 def extract_code_payload(project: Project) -> str:
@@ -44,7 +77,7 @@ def extract_code_payload(project: Project) -> str:
         f"GitHub Repo: {project.github_repo_full_name}",
         f"License: {project.get_license_type_display()}",
         "",
-        "=== SOURCE CODE SAMPLES ==="
+        "=== SOURCE CODE SAMPLES ===",
     ]
 
     code_bytes_collected = 0
@@ -112,7 +145,8 @@ def extract_code_payload(project: Project) -> str:
             if resp.status_code == 200:
                 tree_data = resp.json()
                 tree_files = [
-                    item["path"] for item in tree_data.get("tree", [])
+                    item["path"]
+                    for item in tree_data.get("tree", [])
                     if item.get("type") == "blob"
                     and not any(ig in item["path"].split("/") for ig in IGNORED_DIRS)
                 ]

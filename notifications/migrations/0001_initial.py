@@ -29,8 +29,7 @@ class Migration(migrations.Migration):
                     "phone_number",
                     models.CharField(
                         help_text=(
-                            "Phone number from Telegram contact "
-                            "(verified as belonging to sender)."
+                            "Phone number from Telegram contact (verified as belonging to sender)."
                         ),
                         max_length=20,
                     ),

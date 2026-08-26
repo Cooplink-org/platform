@@ -1,4 +1,5 @@
 import logging
+import os
 import shutil
 import stat
 import subprocess
@@ -18,7 +19,7 @@ def _force_rmtree(path: Path):
     """Remove a directory tree — handles Windows read-only files (e.g. git .pack)."""
     if not path.exists():
         return
-    for root, _dirs, files in path.walk(topdown=False):
+    for root, _dirs, files in os.walk(path, topdown=False):
         root = Path(root)
         for name in files:
             (root / name).chmod(stat.S_IWRITE)
@@ -57,7 +58,7 @@ def build_project_snapshot(project_id):
 
         archive_path = tmp_dir / "archive.zip"
         with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            for root, _dirs, files in repo_path.walk():
+            for root, _dirs, files in os.walk(repo_path):
                 root = Path(root)
                 for fn in files:
                     fpath = root / fn

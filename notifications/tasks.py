@@ -29,12 +29,10 @@ def notify_user_task(user_id, message_type, context):
         "listing_approved": "\u2705 Your listing '{title}' has been approved and is now live!",
         "listing_rejected": "\u274c Your listing '{title}' was rejected. Reason: {reason}",
         "sale_made": (
-            "\U0001f4b0 Great news! You just made a sale! "
-            "'{title}' was purchased for {amount} UZS."
+            "\U0001f4b0 Great news! You just made a sale! '{title}' was purchased for {amount} UZS."
         ),
         "funds_unlocked": (
-            "\U0001f513 {amount} UZS from your sale of '{title}' "
-            "is now available for payout!"
+            "\U0001f513 {amount} UZS from your sale of '{title}' is now available for payout!"
         ),
         "payout_completed": (
             "\U0001f4b8 Your payout of {amount} UZS has been completed successfully."
@@ -158,9 +156,7 @@ def cleanup_expired_telegram_tokens():
     )
 
     # Delete verification codes that are used or expired (older than 24h)
-    deleted_codes = PhoneVerificationCode.objects.filter(
-        q_used_or_expired(old_threshold)
-    ).delete()
+    deleted_codes = PhoneVerificationCode.objects.filter(q_used_or_expired(old_threshold)).delete()
     log.info(
         "Cleaned up %d expired/used verification codes", deleted_codes[0] if deleted_codes else 0
     )

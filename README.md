@@ -65,6 +65,45 @@ uv run celery -A cooplink worker --loglevel=info
 
 ---
 
+## Production Deployment
+
+### 1. Environment
+Set `DJANGO_ENV=prod` and generate strong secrets:
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(50))"   # SECRET_KEY
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"  # FERNET_KEY
+python -c "import secrets; print(secrets.token_urlsafe(32))"   # MIRPAY_CALLBACK_SECRET (optional)
+```
+
+Set `ALLOWED_HOSTS`, `FRONTEND_URL`, `CORS_ALLOWED_ORIGINS` to real domains, and flip
+`SECURE_SSL_REDIRECT=True` once the app terminates TLS (leave `False` behind a proxy that
+already redirects — see `cooplink/settings/prod.py`).
+
+### 2. Run with Docker / Procfile processes
+* **web**: `gunicorn cooplink.wsgi --log-file -`
+* **worker**: `celery -A cooplink worker --loglevel=info`
+* **beat**: `celery -A cooplink beat --loglevel=info`
+* **release**: `python manage.py migrate && python manage.py set_telegram_webhook`
+
+The CI workflow lints (`ruff`) and runs the full test suite on every push to `master`;
+the CD workflow builds and publishes a Docker image to GHCR on every push to `master`.
+
+### 3. Payment providers
+Gateway credentials can be set via env vars or configured at runtime in the Django admin
+(**Payment Settings**), which takes precedence without a restart:
+* **inPAY** — merchant id + token from inpay.uz. Server IP must be whitelisted (Strict mode).
+* **MirPay** — kassa id + API key from mirpay.uz, plus an optional callback secret used to
+  verify `X-MirPay-Signature` HMAC-SHA256 webhook signatures.
+* Webhooks: `/api/payments/inpay/webhook/`, `/api/payments/mirpay/webhook/`.
+* Browser return URLs: `/api/payments/{mirpay|inpay}/{success|cancel}/` forward the buyer
+  to `<FRONTEND_URL>/payment/success|cancel`.
+
+### 4. Payouts & fees
+The seller withdrawal fee percentage is admin-configurable (**Withdrawal fee** singleton);
+each payout request snapshots the fee so history stays accurate.
+
+---
+
 ## Key Endpoints
 * **Health Check**: `GET /api/health/` (Anonymous access enabled)
 * **Admin Panel**: `GET /admin/` (Styled with `django-unfold`)
@@ -92,6 +131,32 @@ uv run celery -A cooplink worker --loglevel=info
 | POST | `/api/listings/projects/{id}/submit/` | JWT (seller) | Move draft → pending_review |
 | GET | `/api/listings/` | — | Public catalog (published only, paginated, filterable, searchable) |
 | GET | `/api/listings/{slug}/` | — | Public project detail (increments `view_count`) |
+| POST/PATCH/DELETE | `/api/listings/{slug}/rate/` | JWT (phone-verified) | Upsert/delete the user's rating & review |
+
+### Payments
+| Method | URL | Auth | Description |
+|--------|-----|------|-------------|
+| GET | `/api/payments/providers/` | — | Enabled payment providers (for the checkout UI) |
+| POST | `/api/payments/verify/` | JWT | Provider-agnostic verification (auto-detects inPAY/MirPay) |
+| POST | `/api/payments/mirpay/verify/` | JWT | Verify a MirPay payment by `payid` |
+| POST | `/api/payments/inpay/verify/` | JWT | Verify an inPAY payment by `order_id` |
+| POST | `/api/payments/mirpay/webhook/` | — | Unified MirPay webhook (HMAC-verified when secret configured) |
+| POST | `/api/payments/inpay/webhook/` | — | inPAY webhook (status re-verified before confirming orders and Crack It entries) |
+
+### Crack It leaderboard
+| Method | URL | Auth | Description |
+|--------|-----|------|-------------|
+| GET | `/api/leaderboard/` | — | Ranked paid entries, totals, settings |
+| POST | `/api/leaderboard/entries/` | — | Create a pending entry (domain, brand, bid ≥ min) |
+| POST | `/api/leaderboard/entries/{id}/pay/` | — | Start inPAY checkout for the entry |
+| POST | `/api/leaderboard/entries/{id}/click/` | — | Public outbound click counter |
+| POST | `/api/leaderboard/verify/` | — | Post-checkout verification (re-checks status with inPAY) |
+
+### Payouts
+| Method | URL | Auth | Description |
+|--------|-----|------|-------------|
+| POST | `/api/payouts/request/` | JWT (seller) | Request a withdrawal (card encrypted at rest; fee + net snapshotted) |
+| GET | `/api/payouts/mine/` | JWT (seller) | Own payouts, balance summary and current fee % |
 
 #### Public catalog query params (`GET /api/listings/`)
 

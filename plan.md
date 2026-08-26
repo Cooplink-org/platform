@@ -1,223 +1,389 @@
-# Cooplink — MVP system design & build plan
+/* ─────────────────────────────────────────────────────────────────────────
+   Crack It page — dark theme, corrected
+   Fixes applied (per better-ui skill + your own Cooplink design tokens):
+   1. ONE accent color, not two (dropped the gold — see note below)
+   2. Radius matches the base system's scale (4/8/12), concentric nesting
+   3. Elevation = shadow, borders stay structural (dividers only)
+   4. Exact polish values: scale(0.96) press, 150ms named transitions,
+      100ms stagger, small translateY on enter
+   ───────────────────────────────────────────────────────────────────────── */
 
-Cooplink: a marketplace where developers list GitHub projects for sale, other developers buy and download them, sellers see sales/stats on a dashboard, and payout happens manually by an admin after a 7-day freeze. Payment via MirPay.uz.
+.crack-it {
+  /* One accent. Warm burnished copper instead of violet — reads premium,
+     doesn't collide with every other "dark + purple" AI-generated dashboard,
+     and still separates cleanly from the marketing site's lime without
+     introducing a second hue on this page. */
+  --bg-primary: #0B0A09;          /* near-black, warm undertone (not blue) */
+  --bg-surface: #16140F;
+  --bg-surface-hover: #1D1A14;
+  --bg-elevated: #201C15;         /* #1 spot only */
 
-This doc has three parts: the assumptions/decisions made for MVP, the gaps that still need real-world answers, and a phase-by-phase set of prompts to feed your agentic coding AI, one at a time.
+  --border-subtle-ci: rgba(255, 255, 255, 0.06);
+  --border-strong-ci: rgba(255, 255, 255, 0.12);
 
----
+  --accent: #C9853B;              /* burnished copper — the only accent */
+  --accent-hover: #DDA062;
+  --accent-bright: #F2B876;       /* for glow/text on rank #1 only — same hue, not a second color */
+  --accent-ink: #1A1006;          /* dark text ON accent-filled surfaces */
 
-## 1. Decisions made for MVP (flag anything you want changed)
+  --text-primary: #F4F1EA;
+  --text-secondary: rgba(244, 241, 234, 0.62);
+  --text-tertiary: rgba(244, 241, 234, 0.38);
 
-- **Stack**: Django + Django REST Framework + PostgreSQL + Celery/Redis. Matches what you already know, and API-first means any frontend (Django templates, a separate React app, mobile later) can sit on top without a rewrite.
-- **Code delivery**: buyers download a **zipped snapshot** of the repo taken at publish time — not a live GitHub repo transfer or collaborator access. Reasons: a seller renaming/deleting/privating their repo later can't break a sale, buyers never see the seller's other repos or full commit history, and revoking access on refund is trivial (just block the download endpoint) instead of needing GitHub API calls to un-invite a collaborator.
-- **Escrow accounting**: "frozen" vs "available" is a computed property based on timestamps (`sale_date + 7 days`), not a status flag flipped by a cron job. Simpler, always correct even if a background job doesn't run that day.
-- **Listings require manual admin approval** before going live — code here gets downloaded and run by strangers, so this is a basic malware/plagiarism/quality gate, not just a nice-to-have.
-- **Platform fee % is snapshotted per order** at sale time, so changing the fee later doesn't rewrite history.
-- **Card numbers for payout are encrypted at rest**, masked everywhere except the one admin payout screen. Manual payout means Cooplink never touches money going out programmatically — the admin transfers it by hand and just marks the request done.
-- **Package/env management: `uv`** instead of pip/venv — `pyproject.toml` + `uv.lock` for reproducible installs, `uv run` for everything.
-- **Admin panel: Django's built-in admin, themed with `django-unfold`**, instead of a hand-rolled DRF admin API. Listing review, payout processing, transaction ledger, and user management all become customized `ModelAdmin` classes with Unfold's dashboard/actions — far less code than a bespoke API + frontend, and it's an internal tool so it doesn't need to match the public site's design.
+  --success: #6FBF8B;
+  --danger: #E0725F;
 
----
+  /* Radius scale matches the base system's steps (4 / 8 / 12), not a
+     one-off 10/12 pair invented for this page alone. */
+  --radius-sm: 4px;    /* rank plain text, arrows */
+  --radius-md: 8px;    /* logo, badge, inputs, buttons, pills */
+  --radius-lg: 12px;   /* row cards (outer) */
+  /* Concentric check: row padding is 20-24px, badge padding is ~8-10px —
+     outer (12px) = inner (8px) + a fraction of the padding step, kept
+     deliberately close rather than arbitrary. */
 
-## 2. MirPay integration — now confirmed
+  --bg: var(--bg-primary);
+  --surface: var(--bg-surface);
+  --surface-raised: var(--bg-surface-hover);
+  --ink-1: var(--text-primary);
+  --ink-2: var(--text-secondary);
+  --ink-3: var(--text-secondary);
+  --ink-4: var(--text-tertiary);
+  --border-subtle: var(--border-subtle-ci);
+  --border: var(--border-strong-ci);
+  --accent-lime: var(--accent); /* keep semantic token compatible with base utilities */
+  --accent-lime-ink: var(--accent-ink);
 
-Full picture, once you shared the rest of the docs:
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
 
-- `POST /api/connect?kassaid=...&api_key=...` → returns the Bearer token used everywhere else. `kassaid`/`api_key` come from the MirPay.uz dashboard, not from us — store them as env vars, cache the resulting token (don't re-fetch it on every request), and refresh on a 401.
-- `POST /api/create-pay?summa=...&info_pay=...` → starts a payment. We pass our internal order reference through `info_pay` (e.g. `"Buyurtma ID: {order.id}"`), which is what should come back in the webhook's `comment` field.
-- `POST /api/pay/invoice/` (form field `payid`) → **checks the real status of a payment on demand.** This is the piece that matters most: since the webhook body carries no signature, we never trust it on its own — every webhook triggers a `check_status(payid)` call, and only that independent answer decides whether an order gets marked paid. That turns an unverifiable webhook into a solid flow.
-- `GET /api/balans` → balance, staff-only visibility.
-- Still open: the docs excerpt doesn't show the exact JSON shape `create-pay` returns (payid, link, etc. — field names to be confirmed against a real test call), and whether the connect token expires. Phase 5 below handles both defensively (logs the raw response, refreshes the token on auth failure) rather than assuming a shape that turns out wrong.
+/* #1 spot — elevated via real shadow, not a fake border-as-shadow */
+.crack-it .ci-row-elevated {
+  background: var(--bg-elevated);
+}
 
-### Legal basics still open
-Nothing yet handles: a seller confirming they actually own the code they're listing, what license a buyer gets, or what happens on a dispute/refund — especially one that lands after a payout already went out. Phase 10 adds a minimum-viable version of each.
+/* ── Fields ─────────────────────────────────────────────────────────────── */
 
----
+.crack-it .ci-field {
+  height: 48px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-primary);
+  padding: 0 16px;
+  font-size: 14px;
+  transition-property: border-color, background-color;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+.crack-it .ci-field::placeholder { color: var(--text-tertiary); }
+.crack-it .ci-field:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+.crack-it select.ci-field option {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
 
-## 3. Core data model (v1)
+/* ── Buttons — exactly two styles, exact press value ───────────────────── */
 
-`User` (+github_id, is_seller) · `Project` (listing) · `ProjectSnapshot` (the actual zip sold) · `Category` · `Order` · `Transaction` (ledger: sale_earning / platform_fee / refund / payout) · `PayoutRequest` · `WebhookLog`.
+.crack-it .ci-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition-property: background-color, border-color, color, box-shadow;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+/* Press feedback: exactly 0.96, CSS transition (interruptible), not a
+   custom easing curve borrowed from the hover state */
+.crack-it .ci-btn:active {
+  transform: scale(0.96);
+  transition: transform 100ms cubic-bezier(0.2, 0, 0, 1);
+}
+.crack-it .ci-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
----
+/* Primary — filled copper, real elevation on hover via shadow not scale */
+.crack-it .ci-btn-primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+  height: 48px;
+  padding: 0 24px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+.crack-it .ci-btn-primary:hover {
+  background: var(--accent-hover);
+  box-shadow: 0 4px 16px rgba(201, 133, 59, 0.28);
+}
 
-## 4. Phase-by-phase prompts
+/* Secondary — ghost outline */
+.crack-it .ci-btn-secondary {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+  height: 36px;
+  padding: 0 16px;
+}
+.crack-it .ci-btn-secondary:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.crack-it .ci-btn-secondary:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
 
-Copy each block into your agentic coding AI **one at a time, in order**. Each one assumes everything from the previous phases already exists.
+/* Pulse on the #1 CTA only — restrained, single-hue glow, still 2s */
+@keyframes ci-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(201, 133, 59, 0); }
+  50%      { box-shadow: 0 0 14px 2px rgba(201, 133, 59, 0.22); }
+}
+.crack-it .ci-btn-pulse {
+  animation: ci-pulse 2s ease-in-out infinite;
+  border-color: var(--accent);
+  color: var(--accent);
+}
 
-### Phase 0 — Project skeleton
+/* ── Category pills ─────────────────────────────────────────────────────── */
 
-```
-You are building the backend for Cooplink, a marketplace where developers list GitHub projects for sale and other developers buy and download them. Stack: Python 3.12, Django 5.x, Django REST Framework, PostgreSQL, Celery + Redis for background jobs. Use `uv` for all package/environment management — no pip/venv, no requirements.txt.
+.crack-it .ci-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition-property: background-color, color, border-color;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+.crack-it .ci-pill:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong-ci);
+}
+.crack-it .ci-pill[aria-selected="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+.crack-it .ci-pill:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
-Set up:
-- Initialize the project with `uv init` / `uv add`, producing a `pyproject.toml` and `uv.lock`. All commands run via `uv run` (e.g. `uv run manage.py runserver`).
-- A new Django project named `cooplink` with these apps: `accounts`, `listings`, `orders`, `payments`, `payouts`, `dashboard`.
-- Install and configure `django-unfold` for the Django admin (this becomes the internal staff tool — listing review, payouts, ledger — built out in later phases). Unfold must be added to INSTALLED_APPS *before* `django.contrib.admin`. Get the default Unfold-themed admin loading at /admin/ with a placeholder site title "Cooplink Admin".
-- `.env`-based settings split (base/dev/prod) using django-environ.
-- PostgreSQL connection via env vars.
-- DRF installed with JWT auth scaffolding (djangorestframework-simplejwt).
-- Celery configured with Redis broker, a basic debug_task to confirm it runs.
-- CORS configured (django-cors-headers).
-- A health-check endpoint GET /api/health/.
-- README with `uv`-based setup instructions, docker-compose.yml for local Postgres+Redis.
+/* ── Leaderboard rows ───────────────────────────────────────────────────── */
 
-This phase is only the skeleton — confirm it runs with `uv run manage.py runserver`, the health check responds, and /admin/ loads with the Unfold theme. No business logic yet.
-```
+.crack-it .ci-row {
+  display: grid;
+  grid-template-columns: 48px 48px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 16px;
+  min-height: 88px;
+  padding: 20px 24px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle); /* structural: separates row from bg */
+  cursor: pointer;
+  transition-property: background-color, box-shadow, transform;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+.crack-it .ci-row:hover {
+  background: var(--bg-surface-hover);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35); /* elevation = shadow, not border */
+  transform: translateY(-2px);
+}
+.crack-it .ci-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
-### Phase 1 — Accounts & GitHub OAuth (login only)
+/* Top 3 — no fake border-as-shadow; real layered shadow instead */
+.crack-it .ci-row-top {
+  padding: 24px;
+  border-color: transparent;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.04) inset,
+    0 8px 30px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(201, 133, 59, 0.18);
+}
+.crack-it .ci-row-top:hover {
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.06) inset,
+    0 12px 36px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(201, 133, 59, 0.32);
+}
 
-```
-Add a custom User model in the `accounts` app (extend AbstractUser) with: github_id, github_username, avatar_url, bio, is_seller (bool), created_at.
+.crack-it .ci-rank-badge {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--accent-ink);
+  background: var(--accent);
+}
+/* Rank #1 — brighter shade of the SAME hue, not a second color */
+.crack-it .ci-rank-badge-gold {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-bright) 100%);
+}
+.crack-it .ci-rank-plain {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-align: center;
+  border-radius: var(--radius-sm);
+}
 
-Implement GitHub OAuth2 login:
-- GET /api/auth/github/login/ redirects to GitHub's authorize URL with scope `read:user user:email` only — do NOT request repo access here, that's a separate incremental step later.
-- GET /api/auth/github/callback/ exchanges the code for a token, fetches the GitHub profile, creates/updates the User, issues our own JWT, and does not persist the GitHub token beyond this request.
-- GET /api/auth/me/ returns the current user's profile.
-- PATCH /api/auth/me/ lets the user edit bio/avatar.
+.crack-it .ci-logo {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  object-fit: contain;
+  background: rgba(255, 255, 255, 0.06);
+  /* Image outline per better-ui: 1px pure white at low opacity in dark mode,
+     never a tinted neutral — a tinted ring reads as dirt on the edge */
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+.crack-it .ci-logo-fallback {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.06);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
 
-Store the GitHub OAuth client id/secret in env vars. Add a README note on registering a GitHub OAuth App and the required callback URL. Write tests for the callback flow with a mocked GitHub API response.
-```
+.crack-it .ci-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.crack-it .ci-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.crack-it .ci-meta {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
-### Phase 2 — Becoming a seller & listing creation
+.crack-it .ci-price {
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+.crack-it .ci-price-top {
+  color: var(--accent-bright);
+}
 
-```
-Add an incremental-auth flow so buyers aren't forced through repo permissions at signup:
-- GET /api/auth/github/connect-repos/ starts a second OAuth request with scope `public_repo` (MVP: public repos only — note in a comment that private repos with `repo` scope can come later), storing the resulting token **encrypted** (Fernet, key from env) on the User, and setting is_seller=True.
-- GET /api/listings/my-repos/ — authenticated seller endpoint, calls the GitHub API with their stored token, returns repo name, description, default_branch, private flag, updated_at, size.
+/* Rank change arrows — subtle, single-frame, matches text weight */
+@keyframes ci-arrow-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.crack-it .ci-arrow {
+  animation: ci-arrow-in 200ms cubic-bezier(0.2, 0, 0, 1) both;
+  font-size: 10px;
+}
 
-In the `listings` app, add a Project model: seller (FK), title, slug, description, github_repo_full_name, github_default_branch, price (Decimal, UZS), category (FK), tags, cover_image, screenshots (JSON list), demo_url, tech_stack, license_type, status (draft/pending_review/published/rejected/suspended), version (int, default 1), created_at, updated_at.
+/* Hero underline — single hue gradient, not a rainbow sweep */
+.crack-it .ci-hero-underline {
+  width: 96px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  margin: 16px auto 0;
+}
 
-Add CRUD endpoints for a seller's own Projects. Status starts at draft. A separate POST /api/listings/{id}/submit/ moves draft → pending_review. Once pending_review or published, block direct edits (explain in a comment: we snapshot at publish time, so silent edits shouldn't change what buyers already paid for — a new version cycle is the only path to changing a published listing).
-```
+.crack-it .ci-banner-success {
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-lg);
+  background: rgba(201, 133, 59, 0.1);
+}
 
-### Phase 3 — Snapshot pipeline & admin review
+.crack-it ::selection {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
 
-```
-Add a ProjectSnapshot model in `listings`: project (FK), version (int), storage_path, file_size, commit_sha, created_at.
+/* ── Inline stake widget ────────────────────────────────────────────────── */
 
-Add a Celery task create_project_snapshot(project_id) that:
-1. Uses the seller's encrypted GitHub token to call GET /repos/{owner}/{repo}/tarball/{ref}.
-2. Streams the tarball into object storage (django-storages, S3-compatible; local dev falls back to FileSystemStorage in a private, non-served directory).
-3. Creates a ProjectSnapshot row pointing at the stored file with the current commit SHA.
-
-Trigger this automatically when a seller calls POST /api/listings/{id}/submit/ (moves to pending_review and kicks off the snapshot task in the background). If snapshot creation fails, revert status to draft and surface the error to the seller.
-
-Register Project in the Django admin with a custom ModelAdmin (Unfold-styled):
-- list_display: title, seller, status, price, created_at.
-- list_filter: status, category.
-- A default queryset/filter view for the review queue (status=pending_review) — use Unfold's list filters or a saved filter link so staff land on the queue quickly.
-- Two admin actions: "Approve selected" (status → published) and a per-object "Reject" action that prompts for a reason (Unfold supports action forms; a simple intermediate confirmation page with a reason field is fine) and stores it on the Project, setting status → rejected.
-- Show the linked ProjectSnapshot(s) inline (read-only) on the Project admin page so staff can see what was actually captured.
-
-Snapshot files must never be publicly reachable by URL — access only through an authenticated download view built in Phase 5.
-```
-
-### Phase 4 — Public marketplace browsing
-
-```
-Build the public catalog in `listings`:
-- GET /api/listings/ — published projects only, paginated, filterable by category/tags/price range/tech_stack, sortable by newest/price/popularity (a view_count field incremented on detail view).
-- GET /api/listings/{slug}/ — detail view: title, description, screenshots, demo_url, tech_stack, price, seller's public profile. Never expose github_repo_full_name or private repo details to non-purchasers.
-- A Category model (name, slug), seeded via data migration with a handful of starter categories (e.g. Telegram bots, e-commerce, automation scripts, web apps, mobile apps, APIs & backends).
-- Basic search via a `?q=` param using Postgres icontains/full-text search on title/description — no need for Elasticsearch at this stage.
-```
-
-### Phase 5 — Orders & MirPay payment
-
-```
-Build `orders` and `payments` apps.
-
-orders.Order: buyer (FK), project (FK), seller (denormalized FK), price_at_purchase, platform_fee_percent (snapshotted), platform_fee_amount, seller_earning_amount, status (pending_payment/paid/failed/refunded), payment_ref (MirPay payid, nullable), created_at, paid_at.
-
-payments app — build a MirPayClient wrapping the real MirPay.uz API:
-- Store `kassaid` and `api_key` as env vars (issued via the MirPay.uz dashboard — never hardcode them).
-- get_token(): POST https://mirpay.uz/api/connect?kassaid={kassaid}&api_key={api_key} to obtain a Bearer token. Cache it (Redis is fine) instead of re-requesting on every call; on a 401 from any other MirPay call, transparently re-fetch a fresh token and retry once.
-- create_payment(order): POST https://mirpay.uz/api/create-pay?summa={amount}&info_pay={reference}, Bearer auth, where reference is something like `"Buyurtma ID: {order.id}"`. Log the raw response and extract whatever payment id/link it contains onto the Order — since the exact response field names aren't confirmed yet from the docs, write this defensively (don't assume a shape; fail loudly with the raw body logged if parsing doesn't find what's expected) and leave a TODO to lock the field names down after one real test call.
-- check_status(payid): POST https://mirpay.uz/api/pay/invoice/ with form field payid, Bearer auth. Returns MirPay's own authoritative status for that payment — this is the trust anchor, since the webhook payload itself has no signature.
-
-Two webhook endpoints, POST /api/payments/mirpay/webhook/success/ and POST /api/payments/mirpay/webhook/fail/ (registered separately in MirPay's kassa settings):
-- Parse the incoming form-encoded payid, summa, status, comment, chek, fiskal, sana.
-- Look up the Order via the comment field (should match the reference passed as info_pay at creation).
-- Never trust the webhook body alone: immediately call check_status(payid) and only proceed if that independent response confirms success, and summa matches order.price_at_purchase exactly.
-- Ignore gracefully (idempotent, return 200) if the Order isn't currently pending_payment, to handle replayed/duplicate webhook calls safely.
-- On confirmed success: mark Order paid, set paid_at, create the ledger Transactions from Phase 6, grant download access.
-- On confirmed fail, or if the independent status check disagrees with the webhook: mark Order failed and log the mismatch clearly.
-- Log every raw webhook payload AND its matching check_status response to a WebhookLog model (endpoint, raw_body, verification_response, received_at, matched_order), for audits.
-
-GET /api/payments/mirpay/balance/ (staff-only) — thin wrapper around GET /api/balans.
-
-Build GET /api/orders/{id}/download/ — authenticated, checks the requester is the buyer on a paid Order, streams the latest ProjectSnapshot for that project from private storage (signed/expiring URL if supported, otherwise a Django view streaming the file directly).
-```
-
-### Phase 6 — Escrow ledger & payouts
-
-```
-Add a Transaction model (orders app or a new `ledger` app): user (FK), order (FK, nullable), type (sale_earning/platform_fee/refund/payout), amount, created_at.
-
-On order paid (from Phase 5), create one sale_earning Transaction for the seller and one platform_fee Transaction.
-
-Add a SellerBalance helper (computed live from Transactions, not stored):
-- available_balance(user): sum of sale_earning transactions older than 7 days, minus payouts, minus refunds.
-- pending_balance(user): sum of sale_earning transactions newer than 7 days, each exposing an unlocks_at (created_at + 7 days) for a per-sale countdown on the dashboard.
-
-Build the `payouts` app:
-- PayoutRequest: seller (FK), amount, destination_card_encrypted, destination_card_last4, status (requested/processing/completed/rejected), admin_note, requested_at, processed_at, processed_by (FK, staff).
-- POST /api/payouts/request/ — seller submits amount (validate ≤ available_balance) and card number (encrypt before storing, never return the full number in any response afterward, only last4).
-- GET /api/payouts/mine/ — seller's own payout history.
-
-Register PayoutRequest in the Django admin (Unfold-styled), staff-only by default:
-- list_display: seller, amount, destination_card_last4, status, requested_at — never show the decrypted card number in list view, only last4.
-- list_filter: status.
-- Admin actions: "Mark as processing", "Complete payout" (creates the payout Transaction, sets processed_at and processed_by to the acting admin user), "Reject" (with a reason field).
-- The full decrypted card number should only be visible on the individual object's detail page, and only to staff — add a comment noting this is the one place it's ever decrypted for display.
-
-Add a comment on the "Complete payout" action making clear the actual money movement happens manually by the admin outside this system (bank transfer/card-to-card) — this action only records that it happened.
-```
-
-### Phase 7 — Seller dashboard & stats
-
-```
-Build read-only aggregation endpoints in `dashboard`, all scoped strictly to request.user:
-- GET /api/dashboard/summary/ — lifetime revenue, available_balance, pending_balance (with next unlock date), total sales, total published listings, total downloads.
-- GET /api/dashboard/sales/ — paginated Orders for this seller: buyer username, project, amount, date, status.
-- GET /api/dashboard/listings/ — this seller's Projects with view_count, sales_count, revenue per listing.
-- GET /api/dashboard/earnings-timeseries/?range=30d — daily bucketed earnings for a simple chart.
-```
-
-### Phase 8 — Admin panel completion
-
-```
-Round out the Django admin (Unfold-themed), all staff-only by default:
-- Register User with a custom ModelAdmin: list_display includes username, email, is_seller, is_active, is_staff, date_joined; list_filter on is_seller/is_active/is_staff; a search field; and a read-only inline or computed field showing a seller's lifetime sales count and revenue on their detail page.
-- Register Transaction (read-only ModelAdmin — this is a ledger, nothing should be editable by hand) with list_display: user, type, amount, order, created_at, and list_filter on type and date.
-- Register Order with list_display: buyer, project, seller, status, price_at_purchase, created_at; list_filter on status and date range; search by buyer/seller/project.
-- Add a custom admin action on Order, "Refund selected", available only while the related seller earning is still within the 7-day frozen window (validate per-row; skip and report any rows outside that window with a message explaining a payout already went out and this needs a manual conversation with the seller instead). On success: reverses the sale_earning and platform_fee transactions with matching refund entries, marks Order refunded.
-- Build a small custom Unfold dashboard view (Unfold supports custom dashboard callbacks/templates) showing basic platform metrics: GMV, active sellers, total published listings, this month vs last month.
-```
-
-### Phase 9 — Notifications
-
-```
-Add a lightweight notification layer using a Telegram bot (reusing the Pyrogram experience already on hand, rather than building email infra from scratch):
-- A Celery task notify(user_id, event_type, context) fired on: listing approved/rejected, sale made (to seller), funds unlocked (to seller — a daily Celery beat job scanning for earnings that just crossed the 7-day mark), payout completed/rejected.
-- Store an optional telegram_chat_id per user, set via a /link command in the bot after the user follows a deep link from their dashboard.
-- If no telegram_chat_id is linked yet, just log the notification for now — no email fallback needed for MVP.
-```
-
-### Phase 10 — Hardening before launch
-
-```
-Do a pass focused on safety, not features:
-- Confirm the MirPay webhook views enforce amount-matching, idempotency, and full logging as specced in Phase 5. Write tests simulating a replayed/spoofed webhook and prove it's rejected or safely ignored.
-- Audit that GitHub tokens and card numbers are encrypted at rest — confirm they never appear in logs or admin list views in plaintext.
-- Add rate limiting on auth endpoints, webhook endpoints, and the download endpoint (DRF throttling is fine for MVP).
-- Add a seller-facing checkbox at listing submission: "I confirm I own or have the right to sell this code, and I agree to Cooplink's seller terms" — store the acceptance timestamp.
-- Write a short SECURITY.md documenting what's still unconfirmed on the MirPay side: (1) the exact JSON field names `create-pay` returns, (2) whether the connect token expires and needs proactive refresh — small items, but worth not forgetting before going live with real money.
-- A basic smoke test suite: signup→login, listing creation→admin approval, purchase→webhook→download, payout request→admin completion.
-```
-
----
-
-## How to use this
-
-Run Phase 0 first, review what comes back, then move to Phase 1, and so on — don't hand over multiple phases at once, the agent will do better with one clear scope at a time. If a phase produces something that conflicts with a later one (e.g. you rename an app), just tell the agent about that state before pasting the next prompt.
+.crack-it .ci-stake {
+  grid-column: 1 / -1;
+  margin-top: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-subtle); /* structural divider — border is correct here */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  /* Staged entrance: this widget appears infrequently (on click), so it
+     earns a stagger — content fades up 4px, faster and subtler than the
+     row entrance since it's a secondary reveal, not the page's first paint */
+  animation: fade-in-up-sm 200ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+@keyframes fade-in-up-sm {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.crack-it .ci-stake-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  min-width: 200px;
+}
+.crack-it .ci-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.crack-it .ci-step-btn {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  font-size: 16px;
+  border-radius: var(--radius-md);
+}
+.crack-it .ci-step-val {
+  min-width: 128px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}

@@ -23,10 +23,9 @@ This document outlines the security posture and technical guards implemented in 
 
 ## 5. Audit Logging
 - **Payout Approval**: Every payout transition is stamped with `processed_by` (staff user) and `processed_at`.
-## 6. MirPay Implementation Gaps (Pending Real-World Verification)
+## 6. MirPay v2 Implementation Status
 
-As real-world testing with the live MirPay API progresses, the following items must be confirmed and locked down:
+1. **JSON Schema & Endpoints**: Aligned with official MirPay v2 API specification (`/api/v2/pay`, `/api/v2/kassa/token`, `/api/v2/pay/{payid}`).
+2. **Auth Token Expiry**: Token is cached and automatically refreshed on 401 Unauthorized responses.
+3. **Webhook Signature**: MirPay v2 HMAC-SHA256 webhook signatures (`X-MirPay-Signature`, `X-MirPay-Timestamp`) are verified using `MIRPAY_CALLBACK_SECRET`. Rejects mismatched signatures with HTTP 403 and stale requests (> 5 minutes) with HTTP 408.
 
-1.  **JSON Schema Mismatch**: The exact JSON field names returned by `create-pay` (e.g., `payid` vs `PayId`, `link` vs `url`) are currently handled defensively. These should be hardcoded once a real response is captured.
-2.  **Auth Token Expiry**: The duration of the `Bearer` token from `/api/connect` is unconfirmed. The system currently uses an "on-failure" refresh strategy (re-fetching upon receiving a 401). A proactive scheduled refresh should be implemented if the token lifetime is short.
-3.  **Webhook Signature**: Confirm if MirPay has plans to implement HMAC signatures for webhooks. For now, the system relies on independent status verification (`check_status`) for every incoming webhook.
