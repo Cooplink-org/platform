@@ -90,6 +90,7 @@ INSTALLED_APPS = [
     "dashboard",
     "notifications",
     "moderation",
+    "leaderboard",
     "django_celery_beat",
 ]
 
@@ -542,5 +543,3 @@ AI_REVIEW_MODELS = [
     "qwen-plus",
     "qwen-turbo",
 ]
-
-
