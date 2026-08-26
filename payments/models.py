@@ -20,6 +20,9 @@ class PaymentProviderConfig(models.Model):
     merchant_id = models.CharField(max_length=50, blank=True)
     merchant_token_encrypted = models.TextField(blank=True)
 
+    # MirPay callback secret for HMAC signature verification
+    callback_secret_encrypted = models.TextField(blank=True)
+
     # URLs
     callback_url = models.URLField(blank=True)
     return_url = models.URLField(blank=True)
@@ -43,12 +46,21 @@ class PaymentProviderConfig(models.Model):
 
         return decrypt_token(self.merchant_token_encrypted)
 
+    @property
+    def callback_secret(self):
+        """Decrypt and return the callback secret (empty string if not set)."""
+        if not self.callback_secret_encrypted:
+            return ""
+        from accounts.utils import decrypt_token
+
+        return decrypt_token(self.callback_secret_encrypted)
+
     def save(self, *args, **kwargs):
         # Ensure only one default provider at a time
         if self.is_default and self.enabled:
-            PaymentProviderConfig.objects.filter(is_default=True).exclude(
-                pk=self.pk
-            ).update(is_default=False)
+            PaymentProviderConfig.objects.filter(is_default=True).exclude(pk=self.pk).update(
+                is_default=False
+            )
         elif not self.enabled:
             self.is_default = False
         super().save(*args, **kwargs)

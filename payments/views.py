@@ -1,23 +1,130 @@
+import hashlib
+import hmac
 import json
 import logging
+import time
 
+from django.conf import settings
 from django.db import transaction as db_transaction
-from django.http import HttpResponse, JsonResponse
+from django.http import HttpResponse, HttpResponseRedirect
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAdminUser, IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 
+from leaderboard.models import LeaderboardEntry
+from leaderboard.views import confirm_entry
 from orders.models import Order, Transaction
 
 from .inpay import InPayClient, InPayError
 from .mirpay import MirPayClient, is_failed_status, is_success_status
-from .models import WebhookLog
+from .models import PaymentProviderConfig, WebhookLog
 
 log = logging.getLogger(__name__)
 mirpay = MirPayClient()
+
+
+def _get_callback_secret():
+    """Return the MirPay callback secret from DB config or env fallback."""
+    config = PaymentProviderConfig.objects.filter(
+        provider=PaymentProviderConfig.Provider.MIRPAY, enabled=True
+    ).first()
+    if config and config.callback_secret:
+        return config.callback_secret.encode()
+    secret = settings.MIRPAY_CALLBACK_SECRET
+    return secret.encode() if secret else b""
+
+
+def _verify_callback_signature(request):
+    """Verify MirPay HMAC-SHA256 callback signature.
+
+    Returns (is_valid, status_code, message).
+    """
+    secret = _get_callback_secret()
+    if not secret:
+        log.warning("MirPay callback secret not configured — skipping signature verification")
+        return True, 200, "ok"
+
+    timestamp = request.headers.get("X-MirPay-Timestamp", "")
+    signature = request.headers.get("X-MirPay-Signature", "")
+
+    if not timestamp or not signature:
+        log.warning("MirPay callback missing signature headers")
+        return False, 403, "bad signature"
+
+    # Reject stale callbacks (> 300s) as per MirPay v2 specification
+    try:
+        if abs(time.time() - int(timestamp)) > 300:
+            log.warning("MirPay callback timestamp too old: %s", timestamp)
+            return False, 408, "stale"
+    except (ValueError, TypeError):
+        log.warning("MirPay callback invalid timestamp: %s", timestamp)
+        return False, 408, "stale"
+
+    raw_body = request.body.decode("utf-8", errors="replace")
+    expected = hmac.new(secret, f"{timestamp}.{raw_body}".encode(), hashlib.sha256).hexdigest()
+
+    if not hmac.compare_digest(expected, signature):
+        log.warning("MirPay callback signature mismatch")
+        return False, 403, "bad signature"
+
+    return True, 200, "ok"
+
+
+def _frontend_redirect(path, request):
+    """Redirect the buyer's browser to a frontend page, preserving query string."""
+    base = settings.FRONTEND_URL.rstrip("/")
+    query = request.GET.urlencode()
+    url = f"{base}{path}" + (f"?{query}" if query else "")
+    return HttpResponseRedirect(url)
+
+
+def mirpay_success_redirect(request):
+    """Same-domain success landing MirPay can redirect to; forwards to the SPA."""
+    log.info("MirPay success redirect query: %s", dict(request.GET))
+    return _frontend_redirect("/payment/success", request)
+
+
+def mirpay_cancel_redirect(request):
+    """Same-domain cancel landing MirPay can redirect to; forwards to the SPA."""
+    return _frontend_redirect("/payment/cancel", request)
+
+
+def inpay_success_redirect(request):
+    """Same-domain success landing inPAY can redirect to; forwards to the SPA."""
+    log.info("inPAY success redirect query: %s", dict(request.GET))
+    return _frontend_redirect("/payment/success", request)
+
+
+def inpay_cancel_redirect(request):
+    """Same-domain cancel landing inPAY can redirect to; forwards to the SPA."""
+    return _frontend_redirect("/payment/cancel", request)
+
+
+def payment_success_redirect(request):
+    """Generic success landing payment providers can redirect to; forwards to the SPA."""
+    log.info("Payment success redirect query: %s", dict(request.GET))
+    return _frontend_redirect("/payment/success", request)
+
+
+def payment_cancel_redirect(request):
+    """Generic cancel landing payment providers can redirect to; forwards to the SPA."""
+    return _frontend_redirect("/payment/cancel", request)
+
+
+@csrf_exempt
+@require_POST
+def mirpay_webhook(request):
+    """Unified MirPay webhook — MirPay only allows one webhook URL.
+
+    Independently verifies the payment status with MirPay and acts accordingly:
+    - If verified as paid  → confirm the order.
+    - If verified as failed → mark the order as failed.
+    - If status is unclear  → keep pending (will be resolved via frontend polling).
+    """
+    return _handle_webhook(request, endpoint="webhook")
 
 
 @csrf_exempt
@@ -33,6 +140,11 @@ def mirpay_webhook_fail(request):
 
 
 def _handle_webhook(request, endpoint):
+    # Verify MirPay callback signature first
+    valid, status_code, msg = _verify_callback_signature(request)
+    if not valid:
+        return HttpResponse(msg, status=status_code)
+
     raw_body = request.body.decode("utf-8", errors="replace")
     parsed = _parse_form_body(raw_body)
 
@@ -53,7 +165,7 @@ def _handle_webhook(request, endpoint):
         log.warning("Webhook [%s] missing payid — %s", endpoint, raw_body)
         wh_log.verification_response = {"error": "missing payid"}
         wh_log.save(update_fields=["verification_response"])
-        return JsonResponse({"status": "ignored", "reason": "missing payid"})
+        return HttpResponse("ok")
 
     # Never trust the webhook alone — independently verify with MirPay
     try:
@@ -62,21 +174,21 @@ def _handle_webhook(request, endpoint):
         log.error("MirPay check_status failed for payid=%s: %s", payid, exc)
         wh_log.verification_response = {"error": str(exc)}
         wh_log.save(update_fields=["verification_response"])
-        return JsonResponse({"status": "error", "reason": "verification failed"}, status=502)
+        return HttpResponse("verification failed", status=502)
 
     wh_log.verification_response = verification
     wh_log.save(update_fields=["verification_response"])
 
-    # Match the order via the comment field from creation
+    # Match the order via payment_ref (payid) first, then comment field
     comment_clean = (comment or "").strip()
-    order = _resolve_order(raw_body, comment_clean, verification)
+    order = _resolve_order(raw_body, comment_clean, verification, payid=payid)
 
     if order:
         wh_log.matched_order = order
         wh_log.save(update_fields=["matched_order"])
 
     if not order:
-        return JsonResponse({"status": "ignored", "reason": "no matching order"})
+        return HttpResponse("ok")
 
     # Idempotency: ignore if not pending_payment
     if order.status != Order.Status.PENDING_PAYMENT:
@@ -86,7 +198,7 @@ def _handle_webhook(request, endpoint):
             order.status,
             endpoint,
         )
-        return JsonResponse({"status": "ignored", "reason": f"order is {order.status}"})
+        return HttpResponse("ok")
 
     # Verify summa matches
     verified_summa = verification.get("summa") or verification.get("Summa")
@@ -104,10 +216,29 @@ def _handle_webhook(request, endpoint):
         except (ValueError, TypeError):
             log.error("Could not parse verified_summa: %s", verified_summa)
 
+    # Unified webhook — trust the verification result
+    if endpoint == "webhook":
+        if verified_status_ok:
+            _confirm_payment(order)
+            log.info("Order %s marked paid via unified webhook", order.id)
+            return HttpResponse("ok")
+        verified_failed = is_failed_status(verification)
+        if verified_failed:
+            order.status = Order.Status.FAILED
+            order.save(update_fields=["status"])
+            log.warning("Order %s marked failed via unified webhook", order.id)
+            return HttpResponse("ok")
+        log.warning(
+            "Unified webhook for order %s but verification unclear (%s) — keeping pending.",
+            order.id,
+            verification.get("status"),
+        )
+        return HttpResponse("ok")
+
     if endpoint == "success" and verified_status_ok:
         _confirm_payment(order)
         log.info("Order %s marked paid via webhook [success]", order.id)
-        return JsonResponse({"status": "success", "order_id": order.id})
+        return HttpResponse("ok")
 
     # Fail webhook and verification explicitly confirms failure
     if endpoint == "fail" and not verified_status_ok:
@@ -116,20 +247,20 @@ def _handle_webhook(request, endpoint):
             order.status = Order.Status.FAILED
             order.save(update_fields=["status"])
             log.warning("Order %s marked failed via webhook [fail]", order.id)
-            return JsonResponse({"status": "failed", "order_id": order.id})
+            return HttpResponse("ok")
         # Verification is unclear (e.g. "processing") — don't mark failed yet
         log.warning(
             "Fail webhook for order %s but verification unclear (%s) — keeping pending.",
             order.id,
             verification.get("status"),
         )
-        return JsonResponse({"status": "pending", "order_id": order.id})
+        return HttpResponse("ok")
 
     # Fail webhook but verification says it's OK — trust the API, not the webhook
     if endpoint == "fail" and verified_status_ok:
         _confirm_payment(order)
         log.info("Order %s marked paid despite fail webhook (verification OK)", order.id)
-        return JsonResponse({"status": "success", "order_id": order.id})
+        return HttpResponse("ok")
 
     # Success/ambiguous webhook but verification didn't confirm — keep pending
     log.warning(
@@ -139,36 +270,63 @@ def _handle_webhook(request, endpoint):
         order.id,
         json.dumps(verification, ensure_ascii=False),
     )
-    return JsonResponse({"status": "pending", "order_id": order.id})
+    return HttpResponse("ok")
 
 
 def _parse_form_body(raw_body):
     """Parse form-encoded body into a dict."""
-    result = {}
-    for part in raw_body.split("&"):
-        if "=" in part:
-            key, val = part.split("=", 1)
-            from urllib.parse import unquote_plus
+    from urllib.parse import parse_qs
 
-            result[key.strip()] = unquote_plus(val.strip())
-    return result
+    parsed = parse_qs(raw_body)
+    return {k: v[0] for k, v in parsed.items() if v}
 
 
-def _resolve_order(_raw_body, comment, verification):
-    """Try to find the Order from the webhook comment or verification response."""
-    if comment and "Buyurtma ID:" in comment:
-        try:
-            order_id = comment.split("Buyurtma ID:")[1].strip().split()[0]
-            return Order.objects.filter(id=order_id).first()
-        except (IndexError, ValueError):
-            pass
+def _resolve_order(_raw_body, comment, verification, payid=None):
+    """Try to find the Order by payment_ref first, then webhook comment or verification."""
+    if payid:
+        order = Order.objects.filter(payment_ref=str(payid)).first()
+        if order:
+            return order
 
-    # Fallback: try info_pay or description from verification
-    info_pay = verification.get("info_pay") or verification.get("comment") or ""
+    if comment:
+        if "Buyurtma ID:" in comment:
+            try:
+                order_id = comment.split("Buyurtma ID:")[1].strip().split()[0]
+                order = Order.objects.filter(id=order_id).first()
+                if order:
+                    return order
+            except (IndexError, ValueError):
+                pass
+        elif "Buyurtma #" in comment:
+            try:
+                order_id = comment.split("Buyurtma #")[1].strip().split()[0]
+                order = Order.objects.filter(id=order_id).first()
+                if order:
+                    return order
+            except (IndexError, ValueError):
+                pass
+
+    # Fallback: try info_pay, order_info, or comment from verification
+    info_pay = (
+        verification.get("info_pay")
+        or verification.get("comment")
+        or verification.get("order_info")
+        or ""
+    )
     if "Buyurtma ID:" in str(info_pay):
         try:
             order_id = str(info_pay).split("Buyurtma ID:")[1].strip().split()[0]
-            return Order.objects.filter(id=order_id).first()
+            order = Order.objects.filter(id=order_id).first()
+            if order:
+                return order
+        except (IndexError, ValueError):
+            pass
+    elif "Buyurtma #" in str(info_pay):
+        try:
+            order_id = str(info_pay).split("Buyurtma #")[1].strip().split()[0]
+            order = Order.objects.filter(id=order_id).first()
+            if order:
+                return order
         except (IndexError, ValueError):
             pass
 
@@ -227,7 +385,10 @@ def mirpay_verify_payment(request):
     payid = request.data.get("payid")
     if not payid:
         return Response({"error": "payid is required"}, status=400)
+    return _do_mirpay_verify(payid)
 
+
+def _do_mirpay_verify(payid):
     try:
         verification = mirpay.check_status(payid)
     except Exception as exc:
@@ -300,6 +461,12 @@ def inpay_webhook(request):
     order = Order.objects.filter(payment_ref=order_id, provider=Order.Provider.INPAY).first()
 
     if not order:
+        # Not a marketplace order — maybe a Crack It leaderboard entry
+        entry = LeaderboardEntry.objects.filter(payment_ref=order_id).first()
+        if entry:
+            wh_log.verification_response = data
+            wh_log.save(update_fields=["verification_response"])
+            return _handle_leaderboard_entry_webhook(entry, order_id, wh_log)
         log.warning("inPAY webhook — no matching order for order_id=%s", order_id)
         wh_log.verification_response = data
         wh_log.save(update_fields=["verification_response"])
@@ -372,6 +539,87 @@ def inpay_webhook(request):
     return HttpResponse("OK", status=200)
 
 
+def _handle_leaderboard_entry_webhook(entry, order_id, wh_log):
+    """Verify an inPAY payment for a Crack It leaderboard entry and confirm it.
+
+    Mirrors the Order webhook logic: never trust the webhook alone, always
+    re-check the status with inPAY before confirming or failing the entry.
+    """
+    if entry.status == LeaderboardEntry.Status.PAID:
+        log.info("Leaderboard entry %s already paid — ignoring inPAY webhook", entry.id)
+        return HttpResponse("OK", status=200)
+
+    try:
+        client = InPayClient()
+        verification = client.check_status(order_id)
+    except Exception as exc:
+        log.error("inPAY check_status failed for leaderboard ref=%s: %s", order_id, exc)
+        wh_log.verification_response = {"error": str(exc), "webhook": wh_log.verification_response}
+        wh_log.save(update_fields=["verification_response"])
+        return HttpResponse("verification failed", status=502)
+
+    wh_log.verification_response = verification
+    wh_log.save(update_fields=["verification_response"])
+
+    verified_status = str(verification.get("status", "")).strip().lower()
+    verified_amount = verification.get("amount")
+    if verified_amount:
+        try:
+            if float(verified_amount) != float(entry.amount_uzs):
+                log.warning(
+                    "Amount mismatch for leaderboard entry %s: inPAY amount=%s, expected=%s",
+                    entry.id,
+                    verified_amount,
+                    entry.amount_uzs,
+                )
+        except (ValueError, TypeError):
+            log.error("Could not parse verified amount: %s", verified_amount)
+
+    if verified_status == "success":
+        confirm_entry(entry)
+        log.info("Leaderboard entry %s marked paid via inPAY webhook", entry.id)
+        return HttpResponse("OK", status=200)
+
+    if verified_status in ("failed", "cancelled"):
+        entry.status = LeaderboardEntry.Status.FAILED
+        entry.save(update_fields=["status"])
+        log.warning(
+            "Leaderboard entry %s marked failed via inPAY webhook (status=%s)",
+            entry.id,
+            verified_status,
+        )
+        return HttpResponse("OK", status=200)
+
+    log.warning(
+        "inPAY webhook for leaderboard entry %s but verification status is '%s' — keeping pending",
+        entry.id,
+        verified_status,
+    )
+    return HttpResponse("OK", status=200)
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def payment_providers(_request):
+    """GET /api/payments/providers/
+    Returns the enabled payment providers so the frontend can offer a choice.
+    Public — no auth needed.
+    """
+    from .models import PaymentProviderConfig
+
+    configs = PaymentProviderConfig.objects.filter(enabled=True).order_by("-is_default")
+    providers = []
+    for cfg in configs:
+        providers.append(
+            {
+                "provider": cfg.provider,
+                "display_name": cfg.get_provider_display(),
+                "is_default": cfg.is_default,
+            }
+        )
+    return Response({"providers": providers})
+
+
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def inpay_verify_payment(request):
@@ -383,7 +631,10 @@ def inpay_verify_payment(request):
     order_id = request.data.get("order_id")
     if not order_id:
         return Response({"error": "order_id is required"}, status=400)
+    return _do_inpay_verify(order_id)
 
+
+def _do_inpay_verify(order_id):
     try:
         client = InPayClient()
         verification = client.check_status(order_id)
@@ -420,3 +671,28 @@ def inpay_verify_payment(request):
         return Response({"status": order.status, "order_id": order.id})
 
     return Response({"status": "unknown", "detail": "Order not found or status unclear"})
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def payment_verify(request):
+    """POST /api/payments/verify/
+
+    Unified, provider-agnostic payment verification endpoint.
+    Automatically detects whether the order was created via inPAY or MirPay
+    and verifies payment status with the appropriate gateway.
+    """
+    ref = (
+        request.data.get("payid")
+        or request.data.get("order_id")
+        or request.data.get("payment_id")
+        or request.data.get("PayId")
+    )
+    if not ref:
+        return Response({"error": "payid or order_id is required"}, status=400)
+
+    order = Order.objects.filter(payment_ref=str(ref)).first()
+    if order and order.provider == Order.Provider.INPAY:
+        return _do_inpay_verify(str(ref))
+
+    return _do_mirpay_verify(str(ref))

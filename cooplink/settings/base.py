@@ -22,6 +22,7 @@ env = environ.Env(
     FRONTEND_URL=(str, "http://localhost:8000"),
     MIRPAY_KASSA_ID=(str, ""),
     MIRPAY_API_KEY=(str, ""),
+    MIRPAY_CALLBACK_SECRET=(str, ""),
     INPAY_MERCHANT_ID=(str, ""),
     INPAY_MERCHANT_TOKEN=(str, ""),
     TELEGRAM_BOT_TOKEN=(str, ""),
@@ -445,6 +446,7 @@ CURRENT_TERMS_VERSION = "2025-07-v1"
 # MirPay.uz Payment Gateway Credentials
 MIRPAY_KASSA_ID = env("MIRPAY_KASSA_ID")
 MIRPAY_API_KEY = env("MIRPAY_API_KEY")
+MIRPAY_CALLBACK_SECRET = env("MIRPAY_CALLBACK_SECRET")
 
 # inPAY (inpay.uz) Payment Gateway Credentials
 # These are fallback defaults — the admin can override them via the

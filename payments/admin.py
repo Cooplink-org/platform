@@ -12,11 +12,27 @@ class PaymentProviderConfigForm(forms.ModelForm):
 
     merchant_token = forms.CharField(
         widget=forms.PasswordInput(
-            render_value=True, attrs={"placeholder": "32-character merchant token"}
+            render_value=True, attrs={"placeholder": "Provider secret token / API key"}
         ),
         required=False,
-        help_text="Merchant token from inPAY dashboard. Stored encrypted in the database. "
-        "Leave blank to keep the existing token.",
+        help_text=(
+            "inPAY: merchant token from inpay.uz dashboard. "
+            "MirPay: API key from mirpay.uz dashboard. Stored encrypted in the database. "
+            "Leave blank to keep the existing value."
+        ),
+    )
+
+    callback_secret = forms.CharField(
+        widget=forms.PasswordInput(
+            render_value=True, attrs={"placeholder": "Webhook HMAC secret (MirPay)"}
+        ),
+        required=False,
+        help_text=(
+            "MirPay only: shared secret used to verify X-MirPay-Signature HMAC "
+            "signatures on webhooks. Stored encrypted in the database. "
+            "Leave blank to keep the existing value (falls back to the "
+            "MIRPAY_CALLBACK_SECRET env var)."
+        ),
     )
 
     class Meta:
@@ -34,6 +50,18 @@ class PaymentProviderConfigForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         if self.instance and self.instance.pk:
             self.fields["provider"].disabled = True
+        if self.instance and self.instance.provider == PaymentProviderConfig.Provider.MIRPAY:
+            self.fields[
+                "merchant_id"
+            ].help_text = "MirPay kassa ID (kassaid) from mirpay.uz dashboard."
+            self.fields["callback_url"].help_text = "MirPay payment success URL."
+        else:
+            self.fields["merchant_id"].help_text = "inPAY merchant ID from inpay.uz dashboard."
+            self.fields["callback_url"].help_text = "inPAY webhook callback URL."
+        if self.instance and self.instance.provider == PaymentProviderConfig.Provider.MIRPAY:
+            self.fields[
+                "return_url"
+            ].help_text = "Page customers are redirected to after MirPay payment."
 
     def save(self, commit=True):
         instance = super().save(commit=False)
@@ -41,6 +69,9 @@ class PaymentProviderConfigForm(forms.ModelForm):
         if token:
             instance.merchant_token_encrypted = encrypt_token(token)
         # If no new token entered, keep the existing encrypted value
+        secret = self.cleaned_data.get("callback_secret")
+        if secret:
+            instance.callback_secret_encrypted = encrypt_token(secret)
         if commit:
             instance.save()
         return instance
@@ -49,9 +80,25 @@ class PaymentProviderConfigForm(forms.ModelForm):
 @admin.register(PaymentProviderConfig)
 class PaymentProviderConfigAdmin(ModelAdmin):
     form = PaymentProviderConfigForm
-    list_display = ("provider", "enabled", "is_default", "merchant_id", "updated_at")
+    list_display = (
+        "provider",
+        "enabled",
+        "is_default",
+        "merchant_id",
+        "has_callback_secret",
+        "updated_at",
+    )
     list_filter = ("enabled", "is_default", "provider")
-    readonly_fields = ("created_at", "updated_at", "_decrypted_token_display")
+    readonly_fields = (
+        "created_at",
+        "updated_at",
+        "_decrypted_token_display",
+        "_callback_secret_display",
+    )
+
+    @admin.display(boolean=True, description="Callback secret")
+    def has_callback_secret(self, obj):
+        return bool(obj and obj.callback_secret_encrypted)
 
     fieldsets = (
         (
@@ -61,13 +108,19 @@ class PaymentProviderConfigAdmin(ModelAdmin):
             },
         ),
         (
-            "inPAY Credentials",
+            "Provider Credentials",
             {
-                "fields": ("merchant_id", "merchant_token", "_decrypted_token_display"),
+                "fields": (
+                    "merchant_id",
+                    "merchant_token",
+                    "_decrypted_token_display",
+                    "callback_secret",
+                    "_callback_secret_display",
+                ),
                 "description": (
-                    "Configure inPAY credentials from your merchant dashboard at "
-                    "inpay.uz. The merchant token is stored encrypted (Fernet) and "
-                    "only decrypted when the payment client needs it."
+                    "inPAY: enter your merchant_id and merchant token from inpay.uz. "
+                    "MirPay: enter your kassa ID and API key from mirpay.uz. "
+                    "Tokens are stored encrypted (Fernet) and only decrypted when needed."
                 ),
             },
         ),
@@ -76,7 +129,7 @@ class PaymentProviderConfigAdmin(ModelAdmin):
             {
                 "fields": ("callback_url", "return_url"),
                 "description": (
-                    "callback_url — the URL inPAY sends webhook notifications to. "
+                    "callback_url — the URL the provider sends webhook notifications to. "
                     "return_url — the page customers are redirected to after payment."
                 ),
             },
@@ -92,9 +145,12 @@ class PaymentProviderConfigAdmin(ModelAdmin):
     def get_fieldsets(self, request, obj=None):
         fs = super().get_fieldsets(request, obj)
         if obj is None:
-            # Hide the decrypted token display when creating a new config
+            # Hide the decrypted secret displays when creating a new config
             return [
-                (n, f) for n, f in fs if "_decrypted_token_display" not in f.get("fields", [])
+                (n, f)
+                for n, f in fs
+                if "_decrypted_token_display" not in f.get("fields", [])
+                and "_callback_secret_display" not in f.get("fields", [])
             ]
         return fs
 
@@ -105,6 +161,18 @@ class PaymentProviderConfigAdmin(ModelAdmin):
                 token = decrypt_token(obj.merchant_token_encrypted)
                 if len(token) > 8:
                     return f"{token[:4]}••••••••{token[-4:]}"
+                return "••••••••"
+            except Exception:
+                return "*** decryption error ***"
+        return ""
+
+    @admin.display(description="Callback secret (masked)")
+    def _callback_secret_display(self, obj):
+        if obj and obj.callback_secret_encrypted:
+            try:
+                secret = decrypt_token(obj.callback_secret_encrypted)
+                if len(secret) > 8:
+                    return f"{secret[:4]}••••••••{secret[-4:]}"
                 return "••••••••"
             except Exception:
                 return "*** decryption error ***"

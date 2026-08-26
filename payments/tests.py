@@ -110,8 +110,7 @@ class MirPayWebhookTest(TestCase):
             content_type="application/x-www-form-urlencoded",
         )
         self.assertEqual(resp.status_code, 200)
-        data = resp.json()
-        self.assertEqual(data["status"], "success")
+        self.assertEqual(resp.content, b"ok")
         self.order.refresh_from_db()
         self.assertEqual(self.order.status, Order.Status.PAID)
         self.assertIsNotNone(self.order.paid_at)
@@ -140,7 +139,7 @@ class MirPayWebhookTest(TestCase):
             content_type="application/x-www-form-urlencoded",
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()["status"], "ignored")
+        self.assertEqual(resp.content, b"ok")
 
     @patch("payments.views.mirpay.check_status")
     def test_success_webhook_verification_mismatch_keeps_pending(self, mock_check_status):
@@ -151,7 +150,7 @@ class MirPayWebhookTest(TestCase):
             content_type="application/x-www-form-urlencoded",
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()["status"], "pending")
+        self.assertEqual(resp.content, b"ok")
         self.order.refresh_from_db()
         self.assertEqual(self.order.status, Order.Status.PENDING_PAYMENT)
 
@@ -162,7 +161,7 @@ class MirPayWebhookTest(TestCase):
             content_type="application/x-www-form-urlencoded",
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()["status"], "ignored")
+        self.assertEqual(resp.content, b"ok")
 
     @patch("payments.views.mirpay.check_status")
     def test_fail_webhook_marks_order_failed(self, mock_check_status):
@@ -173,7 +172,7 @@ class MirPayWebhookTest(TestCase):
             content_type="application/x-www-form-urlencoded",
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()["status"], "failed")
+        self.assertEqual(resp.content, b"ok")
         self.order.refresh_from_db()
         self.assertEqual(self.order.status, Order.Status.FAILED)
 
@@ -218,6 +217,83 @@ class MirPayWebhookTest(TestCase):
         self.assertIsNotNone(fee_tx)
         self.assertEqual(earning_tx.amount, Decimal("90000.00"))
         self.assertEqual(fee_tx.amount, Decimal("10000.00"))
+
+    @override_settings(MIRPAY_CALLBACK_SECRET="testsecret")
+    @patch("payments.views.mirpay.check_status")
+    def test_webhook_with_valid_hmac_signature(self, mock_check_status):
+        import hashlib
+        import hmac
+        import time
+
+        mock_check_status.return_value = {
+            "status": "Muvaffaqiyatli!",
+            "summa": "100000",
+            "payid": "MP789",
+        }
+        ts = str(int(time.time()))
+        body = self._form_body()
+        sig = hmac.new(b"testsecret", f"{ts}.{body}".encode(), hashlib.sha256).hexdigest()
+
+        resp = self.client.post(
+            reverse("mirpay_webhook_success"),
+            data=body,
+            content_type="application/x-www-form-urlencoded",
+            HTTP_X_MIRPAY_TIMESTAMP=ts,
+            HTTP_X_MIRPAY_SIGNATURE=sig,
+        )
+        self.assertEqual(resp.status_code, 200)
+
+    @override_settings(MIRPAY_CALLBACK_SECRET="testsecret")
+    def test_webhook_invalid_signature_returns_403(self):
+        import time
+
+        ts = str(int(time.time()))
+        body = self._form_body()
+        resp = self.client.post(
+            reverse("mirpay_webhook_success"),
+            data=body,
+            content_type="application/x-www-form-urlencoded",
+            HTTP_X_MIRPAY_TIMESTAMP=ts,
+            HTTP_X_MIRPAY_SIGNATURE="invalid_signature_hex",
+        )
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.content, b"bad signature")
+
+    @override_settings(MIRPAY_CALLBACK_SECRET="testsecret")
+    def test_webhook_stale_timestamp_returns_408(self):
+        import hashlib
+        import hmac
+        import time
+
+        stale_ts = str(int(time.time()) - 400)
+        body = self._form_body()
+        sig = hmac.new(b"testsecret", f"{stale_ts}.{body}".encode(), hashlib.sha256).hexdigest()
+        resp = self.client.post(
+            reverse("mirpay_webhook_success"),
+            data=body,
+            content_type="application/x-www-form-urlencoded",
+            HTTP_X_MIRPAY_TIMESTAMP=stale_ts,
+            HTTP_X_MIRPAY_SIGNATURE=sig,
+        )
+        self.assertEqual(resp.status_code, 408)
+        self.assertEqual(resp.content, b"stale")
+
+    def test_mirpay_create_payment_amount_out_of_bounds(self):
+        from payments.mirpay import MirPayClient, MirPayError
+
+        client = MirPayClient()
+
+        # Order below 1000 UZS
+        self.order.price_at_purchase = Decimal("500.00")
+        self.order.save()
+        with self.assertRaises(MirPayError):
+            client.create_payment(self.order)
+
+        # Order above 100,000,000 UZS
+        self.order.price_at_purchase = Decimal("150000000.00")
+        self.order.save()
+        with self.assertRaises(MirPayError):
+            client.create_payment(self.order)
 
 
 # ── PaymentProviderConfig model ──────────────────────────────────────────────
@@ -373,9 +449,7 @@ class InPayWebhookTest(TestCase):
             ).exists()
         )
         self.assertTrue(
-            WebhookLog.objects.filter(
-                matched_order=self.order, endpoint="inpay"
-            ).exists()
+            WebhookLog.objects.filter(matched_order=self.order, endpoint="inpay").exists()
         )
 
     @patch("payments.views.InPayClient")
@@ -587,3 +661,38 @@ class InPayVerifyTest(TestCase):
         )
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.data["status"], "paid")
+
+
+class RedirectEndpointsTest(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+    @override_settings(FRONTEND_URL="http://localhost:3000")
+    def test_mirpay_redirects(self):
+        resp = self.client.get(reverse("mirpay_success_redirect") + "?order_id=123")
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.url, "http://localhost:3000/payment/success?order_id=123")
+
+        resp = self.client.get(reverse("mirpay_cancel_redirect") + "?order_id=123")
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.url, "http://localhost:3000/payment/cancel?order_id=123")
+
+    @override_settings(FRONTEND_URL="http://localhost:3000")
+    def test_inpay_redirects(self):
+        resp = self.client.get(reverse("inpay_success_redirect") + "?order_id=456")
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.url, "http://localhost:3000/payment/success?order_id=456")
+
+        resp = self.client.get(reverse("inpay_cancel_redirect") + "?order_id=456")
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.url, "http://localhost:3000/payment/cancel?order_id=456")
+
+    @override_settings(FRONTEND_URL="http://localhost:3000")
+    def test_generic_redirects(self):
+        resp = self.client.get(reverse("payment_success_redirect") + "?order_id=789")
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.url, "http://localhost:3000/payment/success?order_id=789")
+
+        resp = self.client.get(reverse("payment_cancel_redirect") + "?order_id=789")
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.url, "http://localhost:3000/payment/cancel?order_id=789")

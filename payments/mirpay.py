@@ -1,24 +1,27 @@
 import contextlib
+import json
 import logging
 
 import requests
 from django.conf import settings
 from django.core.cache import cache
 
+from .models import PaymentProviderConfig
+
 log = logging.getLogger(__name__)
 
 MIRPAY_TOKEN_CACHE_KEY = "mirpay_access_token"
-MIRPAY_BASE = "https://mirpay.uz/api"
+MIRPAY_BASE = "https://mirpay.uz/api/v2"
 
 
 class MirPayError(Exception):
     pass
 
 
-# Status detection across MirPay response variants. The docs are ambiguous about
-# the exact `status` value for a paid invoice, so accept a broad set and check
-# several plausible keys rather than assuming a single shape.
+# MirPay v2 uses Uzbek status strings
 SUCCESS_STATUS_VALUES = {
+    "muvaffaqiyatli!",
+    "muvaffaqiyatli",
     "success",
     "paid",
     "confirmed",
@@ -30,6 +33,10 @@ SUCCESS_STATUS_VALUES = {
     "yes",
 }
 FAILED_STATUS_VALUES = {
+    "bekor qilingan!",
+    "bekor qilingan",
+    "bekor qilindi!",
+    "bekor qilindi",
     "failed",
     "fail",
     "error",
@@ -54,7 +61,6 @@ def is_success_status(raw) -> bool:
     )
     if value is not None:
         return str(value).strip().lower() in SUCCESS_STATUS_VALUES
-    # Some gateways return a boolean flag instead of a status string.
     return bool(raw.get("success") or raw.get("paid") or raw.get("confirmed"))
 
 
@@ -75,11 +81,44 @@ def is_failed_status(raw) -> bool:
 
 
 class MirPayClient:
-    """Thin wrapper around the MirPay.uz payment gateway API."""
+    """Thin wrapper around the MirPay.uz v2 payment gateway API.
+
+    Reads credentials from the database (PaymentProviderConfig) when a MirPay
+    config row exists and is enabled, falling back to env settings for
+    backward compatibility.
+    """
 
     def __init__(self):
-        self.kassaid = settings.MIRPAY_KASSA_ID
-        self.api_key = settings.MIRPAY_API_KEY
+        self._kassaid = None
+        self._api_key = None
+
+    def _ensure_credentials(self):
+        if self._kassaid is not None:
+            return
+        try:
+            config = PaymentProviderConfig.objects.filter(
+                provider=PaymentProviderConfig.Provider.MIRPAY, enabled=True
+            ).first()
+            if config and config.merchant_id and config.merchant_token:
+                self._kassaid = config.merchant_id
+                self._api_key = config.merchant_token
+                return
+        except Exception:
+            pass
+        self._kassaid = settings.MIRPAY_KASSA_ID
+        self._api_key = settings.MIRPAY_API_KEY
+
+    @property
+    def kassaid(self):
+        self._ensure_credentials()
+        return self._kassaid
+
+    @property
+    def api_key(self):
+        self._ensure_credentials()
+        return self._api_key
+
+    # ── token management ─────────────────────────────────────────────────────
 
     # ── token management ─────────────────────────────────────────────────────
 
@@ -91,11 +130,57 @@ class MirPayClient:
         if cached:
             return cached
 
-        url = f"{MIRPAY_BASE}/connect?kassaid={self.kassaid}&api_key={self.api_key}"
-        resp = requests.post(url, timeout=15)
+        try:
+            kassa_id = int(self.kassaid)
+        except (ValueError, TypeError):
+            kassa_id = self.kassaid
+
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            ),
+        }
+
+        url_v2 = f"{MIRPAY_BASE}/kassa/token"
+        resp = requests.post(
+            url_v2,
+            json={"kassaid": kassa_id, "api_key": self.api_key},
+            headers=headers,
+            timeout=15,
+        )
+
+        # Fallback to v1 endpoint (/api/connect) if v2 returns 404 or 403
+        if resp.status_code in (403, 404):
+            v1_url = "https://mirpay.uz/api/connect"
+            v1_resp = requests.post(
+                v1_url,
+                json={"kassaid": kassa_id, "api_key": self.api_key},
+                headers=headers,
+                timeout=15,
+            )
+            if v1_resp.status_code == 200:
+                resp = v1_resp
+
+        if resp.status_code == 403:
+            raise MirPayError(
+                "MirPay API returned 403 Forbidden. "
+                "Please check your Kassa ID & API key in MirPay dashboard, "
+                "and ensure your server IP is added to the IP Whitelist under Kassa settings at https://mirpay.uz."
+            )
+
         resp.raise_for_status()
         data = resp.json()
-        token = data.get("token") or data.get("access_token")
+
+        # v2 wraps data in {"success": true, "data": {"access_token": "..."}}
+        payload = data.get("data", data) if isinstance(data, dict) else {}
+        token = (
+            payload.get("access_token") or payload.get("token")
+            if isinstance(payload, dict)
+            else None
+        )
         if not token:
             raise MirPayError(f"MirPay token response missing token field: {data}")
 
@@ -110,12 +195,25 @@ class MirPayClient:
         url = f"{MIRPAY_BASE}{path}"
         headers = kwargs.pop("headers", {})
         headers.update(self._bearer_headers())
+        headers.setdefault("Content-Type", "application/json")
+        headers.setdefault("Accept", "application/json")
+        headers.setdefault(
+            "User-Agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        )
         resp = requests.request(method, url, headers=headers, timeout=20, **kwargs)
 
         if resp.status_code == 401 and not retried:
             with contextlib.suppress(Exception):
                 cache.delete(MIRPAY_TOKEN_CACHE_KEY)
             return self._request(method, path, retried=True, **kwargs)
+
+        if resp.status_code == 403:
+            raise MirPayError(
+                "MirPay API returned 403 Forbidden. "
+                "Verify your server IP is whitelisted in MirPay dashboard (Kassalarim settings)."
+            )
 
         resp.raise_for_status()
         return resp
@@ -124,44 +222,47 @@ class MirPayClient:
 
     def create_payment(self, order):
         """
-        POST /api/create-pay
+        POST /api/v2/pay
         Creates a MirPay invoice for the given Order.
         Returns (payid, payment_url, raw_response).
         """
-        import json
-
         amount_uzs = int(order.price_at_purchase)
+        if amount_uzs < 1000 or amount_uzs > 100000000:
+            raise MirPayError(
+                f"MirPay payment amount {amount_uzs} UZS is outside the allowed range "
+                "(1,000 to 100,000,000 UZS)."
+            )
+
         reference = f"Buyurtma ID: {order.id}"
         resp = self._request(
             "POST",
-            f"/create-pay?summa={amount_uzs}&info_pay={reference}",
+            "/pay",
+            json={"summa": amount_uzs, "info_pay": reference},
         )
         raw = resp.json()
         log.info("MirPay create_payment raw response: %s", json.dumps(raw, ensure_ascii=False))
 
-        # Try every plausible field name (case-insensitive)
-        normalized = {k.lower(): v for k, v in raw.items()} if isinstance(raw, dict) else {}
+        # v2 response: {"success": true, "data": {"payid": ..., "payinfo": {...}}}
+        payload = raw.get("data", raw) if isinstance(raw, dict) else {}
 
         payid = (
-            normalized.get("pay_id")
-            or normalized.get("payid")
-            or normalized.get("payment_id")
-            or normalized.get("id")
-            or raw.get("PayId")
-            or raw.get("PaymentId")
-            or raw.get("PayID")
+            payload.get("payid") or payload.get("PayId") or payload.get("id")
+            if isinstance(payload, dict)
+            else None
         )
 
+        payinfo = (
+            payload.get("payinfo", {})
+            if isinstance(payload, dict) and isinstance(payload.get("payinfo"), dict)
+            else {}
+        )
         payment_url = (
-            normalized.get("url")
-            or normalized.get("payment_url")
-            or normalized.get("link")
-            or normalized.get("redirect_url")
-            or normalized.get("checkout_url")
-            or normalized.get("pay_url")
-            or raw.get("Url")
-            or raw.get("PaymentUrl")
-            or raw.get("RedirectUrl")
+            payinfo.get("redirect_url")
+            or payinfo.get("redicet_url")
+            or payinfo.get("url")
+            or payinfo.get("payment_url")
+            or (payload.get("redirect_url") if isinstance(payload, dict) else None)
+            or (payload.get("redicet_url") if isinstance(payload, dict) else None)
         )
 
         if not payid:
@@ -170,8 +271,6 @@ class MirPayClient:
                 f"Raw body: {json.dumps(raw, ensure_ascii=False)}"
             )
 
-        # If MirPay didn't return a redirect URL, construct one from the payid.
-        # MirPay's hosted payment page is at https://mirpay.uz/pay/<payid>
         if not payment_url:
             payment_url = f"https://mirpay.uz/pay/{payid}"
             log.info("MirPay did not return a redirect URL — constructed: %s", payment_url)
@@ -180,21 +279,13 @@ class MirPayClient:
 
     def check_status(self, payid):
         """
-        POST /api/pay/invoice/  (form-encoded)
+        GET /api/v2/pay/{payid}
         Returns the authoritative payment status from MirPay.
         """
-        import json
-
-        resp = self._request(
-            "POST",
-            "/pay/invoice/",
-            data={"payid": payid},
-        )
+        resp = self._request("GET", f"/pay/{payid}")
         try:
             raw = resp.json()
         except ValueError:
-            # Gateways occasionally return an HTML error page or empty body —
-            # fail loudly with the raw text logged instead of a cryptic error.
             log.error(
                 "MirPay check_status returned non-JSON for payid=%s: %s",
                 payid,
@@ -204,9 +295,18 @@ class MirPayClient:
                 f"MirPay check_status returned non-JSON response: {resp.text[:500]!r}"
             ) from None
         log.info("MirPay check_status raw response: %s", json.dumps(raw, ensure_ascii=False))
-        return raw
+
+        # v2 wraps in {"success": true, "data": {"payinfo": {...}}}
+        payload = raw.get("data", raw) if isinstance(raw, dict) else {}
+        if isinstance(payload, dict) and isinstance(payload.get("payinfo"), dict):
+            payinfo = payload["payinfo"]
+        else:
+            payinfo = payload
+        return payinfo
 
     def get_balance(self):
-        """GET /api/balans — returns current kassa balance."""
-        resp = self._request("GET", "/balans")
-        return resp.json()
+        """GET /api/v2/balance — returns current kassa balance."""
+        resp = self._request("GET", "/balance")
+        raw = resp.json()
+        # v2 wraps in {"success": true, "data": {"kassa_id": ..., "balans": ...}}
+        return raw.get("data", raw) if isinstance(raw, dict) else raw

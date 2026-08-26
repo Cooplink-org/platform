@@ -79,42 +79,93 @@ class InPayClient:
             "Accept": "application/json",
         }
 
+    @staticmethod
+    def _clear_cached_token():
+        with contextlib.suppress(Exception):
+            cache.delete(INPAY_TOKEN_CACHE_KEY)
+
+    @staticmethod
+    def _is_token_error(raw) -> bool:
+        """inPAY reports bad/expired bearer tokens as HTTP 200 + success=false
+        (error_code INVALID_TOKEN) instead of a 401/403 status."""
+        if not isinstance(raw, dict):
+            return False
+        code = str(raw.get("error_code") or "").upper()
+        message = str(raw.get("message") or "").lower()
+        if raw.get("success") is not False:
+            return False
+        return code == "INVALID_TOKEN" or "bearer token" in message
+
     def _request(self, method, path, *, retried=False, **kwargs):
         url = f"{INPAY_BASE}{path}"
         headers = kwargs.pop("headers", {})
         headers.update(self._bearer_headers())
         resp = requests.request(method, url, headers=headers, timeout=20, **kwargs)
 
-        if resp.status_code == 401 and not retried:
-            with contextlib.suppress(Exception):
-                cache.delete(INPAY_TOKEN_CACHE_KEY)
+        if resp.status_code in (401, 403) and not retried:
+            self._clear_cached_token()
             return self._request(method, path, retried=True, **kwargs)
 
+        if not resp.ok:
+            log.error(
+                "inPAY %s %s failed: HTTP %s body=%s",
+                method,
+                url,
+                resp.status_code,
+                resp.text[:500],
+            )
         resp.raise_for_status()
         return resp
 
+    def _send(self, method, path, *, retried=False, **kwargs):
+        """_request + JSON parse, re-authenticating once when inPAY flags the
+        bearer token via its HTTP-200 error envelope."""
+        resp = self._request(method, path, retried=retried, **kwargs)
+        try:
+            raw = resp.json()
+        except ValueError:
+            log.error("inPAY %s %s returned non-JSON: %s", method, path, resp.text[:500])
+            raise InPayError(
+                f"inPAY {method} {path} returned non-JSON response: {resp.text[:500]!r}"
+            ) from None
+        if self._is_token_error(raw):
+            if retried:
+                raise InPayError(f"inPAY {method} {path} rejected token after refresh: {raw}")
+            self._clear_cached_token()
+            return self._send(method, path, retried=True, **kwargs)
+        return raw
+
     # ── payment lifecycle ────────────────────────────────────────────────────
 
-    def create_payment(self, order):
+    def create_payment(
+        self, order, client_ip: str = "", *, amount=None, description=None, return_url=None
+    ):
         """POST /create/ — create a payment transaction.
 
         Returns (order_id, pay_url, raw_response).
         The inPAY order_id is stored on Order.payment_ref for later matching.
+        ``client_ip`` is the real payer IP; it is recorded in inPAY's audit
+        trail only and does not affect the connecting-IP whitelist.
+
+        ``amount``/``description``/``return_url`` override the Order-derived
+        defaults, for non-Order payments (e.g. leaderboard bids).
         """
-        amount_uzs = int(order.price_at_purchase)
+        amount_uzs = int(amount if amount is not None else order.price_at_purchase)
         body = {
             "merchant_id": self.merchant_id,
             "token": self.merchant_token,
             "amount": amount_uzs,
-            "description": f"Buyurtma ID: {order.id}",
+            "description": description or f"Buyurtma ID: {order.id}",
         }
+        if client_ip:
+            body["client_ip"] = client_ip
         if self.config.callback_url:
             body["callback_url"] = self.config.callback_url
-        if self.config.return_url:
-            body["return_url"] = self.config.return_url
+        effective_return_url = return_url or self.config.return_url
+        if effective_return_url:
+            body["return_url"] = effective_return_url
 
-        resp = self._request("POST", "/create/", json=body)
-        raw = resp.json()
+        raw = self._send("POST", "/create/", json=body)
         log.info("inPAY create_payment raw response: %s", json.dumps(raw, ensure_ascii=False))
 
         if not raw.get("success"):
@@ -140,22 +191,11 @@ class InPayClient:
         This endpoint does not require auth per the inPAY docs, but we send
         the Bearer token anyway for consistency and in case inPAY tightens this.
         """
-        resp = self._request(
+        raw = self._send(
             "GET",
             "/transactions/",
             params={"order_id": order_id},
         )
-        try:
-            raw = resp.json()
-        except ValueError:
-            log.error(
-                "inPAY check_status returned non-JSON for order_id=%s: %s",
-                order_id,
-                resp.text[:1000],
-            )
-            raise InPayError(
-                f"inPAY check_status returned non-JSON response: {resp.text[:500]!r}"
-            ) from None
         log.info("inPAY check_status raw response: %s", json.dumps(raw, ensure_ascii=False))
         return raw
 
