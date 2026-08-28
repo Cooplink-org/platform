@@ -1,0 +1,17 @@
+[Unit]
+Description=Cooplink Celery worker
+After=network.target postgresql.service redis-server.service
+Requires=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=cooplink
+Group=cooplink
+WorkingDirectory=/opt/cooplink
+EnvironmentFile=/opt/cooplink/.env
+ExecStart=/opt/cooplink/.venv/bin/celery -A cooplink worker --loglevel=info
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
