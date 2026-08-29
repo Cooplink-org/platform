@@ -190,6 +190,12 @@ nginx serves `/opt/cooplink/media` directly and needs read access.
 chmod -R a+rX /opt/cooplink/media
 chown -R cooplink:cooplink /opt/cooplink/media
 ```
+On **AlmaLinux/RHEL with SELinux**, also set the httpd file context or nginx is
+denied at the kernel level:
+```bash
+semanage fcontext -a -t httpd_sys_content_t "/opt/cooplink/media(/.*)?"
+restorecon -Rv /opt/cooplink/media
+```
 
 ### Permissions / "address already in use" on port 80/443
 Another web server (often the default nginx site) is bound. Remove it:
