@@ -16,7 +16,10 @@ PostgreSQL runs locally as the primary database.
 
 ## Prerequisites
 
-- A fresh Ubuntu 22.04/24.04 server with a public IPv4.
+- A Linux server with a public IPv4. Tested on **Ubuntu 22.04/24.04** and
+  **AlmaLinux / Rocky / RHEL 9** (the script auto-detects `apt` vs `dnf`).
+- Run the script as **root** (or `sudo`). On RHEL-family boxes, SELinux is
+  handled automatically by the script (`httpd_can_network_connect`).
 - A domain (or subdomain) with an **A record** pointing at the server IP
   (e.g. `api.cooplink.uz → 1.2.3.4`). SSL will fail if DNS doesn't resolve yet.
 - Code placed at `/opt/cooplink` (either `git clone` or upload the folder).
@@ -116,6 +119,24 @@ journalctl -u cooplink-web -n 50   # crash on boot? usually a missing env var
 ```
 Common cause: `.env` missing or `SECRET_KEY` empty → Django refuses to start.
 Fix the `.env`, then `systemctl restart cooplink-web`.
+
+On **AlmaLinux/RHEL with SELinux Enforcing**, a 502 can come from SELinux
+blocking nginx→gunicorn even though both are up:
+```bash
+getsebool httpd_can_network_connect          # expect: on
+setsebool -P httpd_can_network_connect on
+systemctl reload nginx
+```
+
+### RHEL/AlmaLinux: PostgreSQL fails to start
+The cluster must be initialised once. The script does this, but if you ran it
+manually:
+```bash
+postgresql-setup --initdb
+systemctl enable --now postgresql
+```
+Also ensure `pg_hba.conf` (`/var/lib/pgsql/data/pg_hba.conf`) allows
+`host ... 127.0.0.1/32 scram-sha-256` for the app's TCP connection.
 
 ### 400 Bad Request / "DisallowedHost"
 `ALLOWED_HOSTS` in `.env` doesn't include the domain.
