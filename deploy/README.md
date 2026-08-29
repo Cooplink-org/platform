@@ -102,9 +102,43 @@ systemctl restart cooplink-web cooplink-worker cooplink-beat
 ```bash
 journalctl -u cooplink-web -f      # gunicorn / Django requests
 journalctl -u cooplink-worker -f   # celery worker
-journalctl -u cooplink-beat -f     # celery beat scheduler
+journalctl -u cooplink-beat -f     # celery beat
 journalctl -u nginx -f             # proxy / TLS errors
 ```
+
+---
+
+## Deploying on Render (alternative to self-hosting)
+
+The backend also runs on Render at `https://cpbackend.onrender.com`. Create **three**
+Render services from this repo (all using the `Dockerfile` or a Python environment):
+
+1. **Web service** — start: `gunicorn cooplink.wsgi:application --bind 0.0.0.0:$PORT`
+2. **Background worker** — start: `celery -A cooplink worker --loglevel=info`
+3. **Celery beat** — start: `celery -A cooplink beat --loglevel=info`
+
+Set these environment variables in the Render dashboard (group):
+
+| Variable | Value |
+|----------|-------|
+| `DJANGO_ENV` | `prod` |
+| `SECRET_KEY` | generate `python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"` |
+| `FERNET_KEY` | generate `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
+| `ALLOWED_HOSTS` | `cpbackend.onrender.com,<your-custom-domain>` (or `*.onrender.com`) |
+| `DATABASE_URL` | Render Postgres internal URL |
+| `CELERY_BROKER_URL` / `CELERY_RESULT_BACKEND` | Render Redis internal URL |
+| `FRONTEND_URL` | `https://coopl.vercel.app` |
+| `CORS_ALLOWED_ORIGINS` | `https://coopl.vercel.app` |
+| `GITHUB_CALLBACK_URL` | `https://cpbackend.onrender.com/api/auth/github/callback/` |
+| `DEBUG` | `False` |
+
+Render sets `PORT`; gunicorn must bind to `$PORT`, not `8000`. The Dockerfile
+exposes `8000` — for Render either override the start command with `$PORT` or
+set the service's port to 8000. For PR builds / custom domains, add them to
+`ALLOWED_HOSTS`.
+
+The frontend (`Cooplink-org/frontend`, on Vercel) must set its build env
+`VITE_API_BASE_URL=https://cpbackend.onrender.com/api` so it calls this backend.
 
 ---
 
